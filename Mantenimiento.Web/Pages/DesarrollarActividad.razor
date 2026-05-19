@@ -1,0 +1,611 @@
+@page "/actividad/{OrdenId:guid}/{OperacionId:guid}"
+@using Mantenimiento.Application.DTOs
+@using Mantenimiento.Domain.Enums
+@using Mantenimiento.Web.Services
+@inject OrdenTrabajoClient OrdenTrabajoClient
+@inject MaterialClient MaterialClient
+@inject NavigationManager NavigationManager
+@attribute [Authorize(Roles = "Tecnico")]
+
+<div class="container mt-4" style="max-width:860px">
+
+    @if (_loading)
+    {
+        <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+    }
+    else if (_orden == null || _op == null)
+    {
+        <div class="alert alert-danger">No se encontró la operación solicitada.</div>
+    }
+    else if (_op.Estado == EstadoOperacion.Finalizada)
+    {
+        <div class="alert alert-warning d-flex align-items-center gap-3">
+            <i class="bi bi-lock-fill fs-4"></i>
+            <div>
+                <strong>Operación finalizada.</strong> Esta operación ya fue completada y no puede modificarse.
+                <div class="mt-2">
+                    <a href="/añadir-operacion/@OrdenId" class="btn btn-sm btn-outline-secondary">
+                        <i class="bi bi-arrow-left me-1"></i>Volver a operaciones
+                    </a>
+                </div>
+            </div>
+        </div>
+    }
+    else
+    {
+        <!-- Cabecera orden -->
+        <div class="d-flex justify-content-between align-items-start mb-3">
+            <div>
+                <h4 class="mb-0">Orden <span class="text-primary">@_orden.Folio</span></h4>
+                <small class="text-muted">@_orden.Descripcion</small>
+            </div>
+            <span class="badge fs-6 @GetOrdenBadge(_orden.Estado)">@_orden.Estado</span>
+        </div>
+
+        <!-- Tarjeta operación -->
+        <div class="card shadow-sm mb-4">
+            <div class="card-header bg-secondary text-white d-flex justify-content-between">
+                <span>Operación <strong>@_op.Numero</strong> — @_op.Descripcion</span>
+                <span class="badge @GetEstadoOpBadge(_op.Estado)">@_op.Estado</span>
+            </div>
+            <div class="card-body">
+                <p class="mb-1 text-muted small">Horas estimadas: <strong>@_op.HorasHombre h</strong></p>
+            </div>
+        </div>
+
+        <!-- Formulario actividad -->
+        <div class="card shadow-sm">
+            <div class="card-header bg-primary text-white">
+                <h5 class="mb-0">Registrar actividad</h5>
+            </div>
+            <div class="card-body">
+
+                <!-- Tipo de registro -->
+                <div class="mb-3">
+                    <label class="form-label fw-semibold">Tipo de registro *</label>
+                    <div class="d-flex gap-4">
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" id="rdPausa"
+                                   checked="@(!_request.EsFinalizacion)"
+                                   @onchange="() => { _request.EsFinalizacion = false; }" />
+                            <label class="form-check-label" for="rdPausa">Pausa</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" id="rdFin"
+                                   checked="@(_request.EsFinalizacion)"
+                                   @onchange="() => { _request.EsFinalizacion = true; _motivoPausaStr = string.Empty; _materiales.Clear(); }" />
+                            <label class="form-check-label" for="rdFin">Finalización</label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Fechas -->
+                <div class="row g-3 mb-3">
+                    <div class="col-md-6">
+                        <label class="form-label fw-semibold">
+                            Fecha y hora de inicio
+                            @if (_inicioDeshabilitado)
+                            {
+                                <span class="badge bg-secondary fw-normal ms-1" style="font-size:.7rem">Bloqueado</span>
+                            }
+                        </label>
+                        @if (_inicioDeshabilitado)
+                        {
+                            <!-- Deshabilitado: campo visual + valor oculto para que siga disponible en C# -->
+                            <input type="datetime-local" class="form-control bg-light text-muted"
+                                   value="@_fechaInicioStr" disabled />
+                        }
+                        else
+                        {
+                            <input type="datetime-local" class="form-control"
+                                   value="@_fechaInicioStr"
+                                   @onchange="e => { _fechaInicioStr = e.Value?.ToString() ?? string.Empty; RecalcularDuracion(); }" />
+                        }
+                    </div>
+                    @if (_request.EsFinalizacion)
+                    {
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold">Fecha y hora de fin *</label>
+                            <input type="datetime-local"
+                                   class="form-control @(!string.IsNullOrEmpty(_errorFechaFin) ? "is-invalid" : "")"
+                                   value="@_fechaFinStr"
+                                   @onchange="e => { _fechaFinStr = e.Value?.ToString() ?? string.Empty; ValidarFechaFin(); }" />
+                            @if (!string.IsNullOrEmpty(_errorFechaFin))
+                            {
+                                <div class="invalid-feedback d-block">@_errorFechaFin</div>
+                            }
+                        </div>
+                        @if (!string.IsNullOrEmpty(_duracionTexto))
+                        {
+                            <div class="col-12">
+                                <label class="form-label fw-semibold">Duración de la intervención</label>
+                                <input type="text" class="form-control bg-light" disabled value="@_duracionTexto" />
+                            </div>
+                        }
+                    }
+                </div>
+
+                <!-- Motivo de pausa -->
+                @if (!_request.EsFinalizacion)
+                {
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Motivo de pausa *</label>
+                        <select class="form-select" style="max-width:320px"
+                                value="@_motivoPausaStr"
+                                @onchange="OnMotivoPausaChanged">
+                            <option value="">-- Seleccione --</option>
+                            @foreach (var m in Enum.GetValues<MotivoPausa>())
+                            {
+                                <option value="@m.ToString()">@GetMotivoPausaLabel(m)</option>
+                            }
+                        </select>
+                    </div>
+
+                    <!-- Materiales: solo cuando el motivo es NecesidadEquipos -->
+                    @if (_motivoPausaStr == nameof(MotivoPausa.NecesidadEquipos))
+                    {
+                        <div class="mb-3">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <label class="form-label fw-semibold mb-0">Materiales solicitados *</label>
+                                <div class="d-flex gap-2">
+                                    <button type="button" class="btn btn-sm btn-outline-primary" @onclick="AgregarFilaMaterial">
+                                        <i class="bi bi-plus-circle me-1"></i>Del catálogo
+                                    </button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="AgregarFilaPersonalizada">
+                                        <i class="bi bi-pencil-square me-1"></i>Material diferente
+                                    </button>
+                                </div>
+                            </div>
+
+                            @if (_materiales.Any())
+                            {
+                                <table class="table table-sm table-bordered align-middle">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>Tipo</th>
+                                            <th>Material</th>
+                                            <th style="width:100px">Cantidad</th>
+                                            <th style="width:46px"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @for (int i = 0; i < _materiales.Count; i++)
+                                        {
+                                            var fila = _materiales[i];
+                                            var idx  = i;
+                                            <tr>
+                                                @if (fila.EsPersonalizado)
+                                                {
+                                                    <!-- Fila material no catalogado: ocupa las dos primeras columnas -->
+                                                    <td class="text-muted small fst-italic align-middle" style="width:120px">
+                                                        No catalogado
+                                                    </td>
+                                                    <td>
+                                                        <input class="form-control form-control-sm"
+                                                               placeholder="Nombre del material"
+                                                               @bind="fila.NombreMaterial" />
+                                                    </td>
+                                                }
+                                                else
+                                                {
+                                                    <!-- Combo Tipo -->
+                                                    <td>
+                                                        <select class="form-select form-select-sm"
+                                                                value="@fila.TipoMaterial"
+                                                                @onchange="e => OnTipoChanged(fila, e.Value?.ToString())">
+                                                            <option value="">-- Tipo --</option>
+                                                            @foreach (var tipo in _tiposMaterial)
+                                                            {
+                                                                <option value="@tipo" selected="@(fila.TipoMaterial == tipo)">@tipo</option>
+                                                            }
+                                                        </select>
+                                                    </td>
+                                                    <!-- Combo Material filtrado por tipo -->
+                                                    <td>
+                                                        <select class="form-select form-select-sm"
+                                                                disabled="@string.IsNullOrEmpty(fila.TipoMaterial)"
+                                                                value="@fila.MaterialId?.ToString()"
+                                                                @onchange="e => OnMaterialSelected(fila, e.Value?.ToString())">
+                                                            <option value="">-- Material --</option>
+                                                            @foreach (var mat in MaterialesPorTipo(fila.TipoMaterial))
+                                                            {
+                                                                <option value="@mat.Id.ToString()" selected="@(fila.MaterialId?.ToString() == mat.Id.ToString())">
+                                                                    @mat.Nombre
+                                                                </option>
+                                                            }
+                                                        </select>
+                                                    </td>
+                                                }
+                                                <!-- Cantidad -->
+                                                <td>
+                                                    <input type="number" class="form-control form-control-sm" min="1"
+                                                           @bind="fila.Cantidad" />
+                                                </td>
+                                                <!-- Quitar -->
+                                                <td class="text-center">
+                                                    <button class="btn btn-sm btn-outline-danger"
+                                                            @onclick="() => _materiales.RemoveAt(idx)">
+                                                        <i class="bi bi-x"></i>
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            }
+                            else
+                            {
+                                <div class="text-muted small fst-italic">Agregue al menos un material solicitado.</div>
+                            }
+                        </div>
+                    }
+                }
+
+                <!-- Detalle finalización -->
+                @if (_request.EsFinalizacion)
+                {
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Detalle de finalización *</label>
+                        <textarea class="form-control @(_detalleRequerido ? "is-invalid" : "")" rows="3"
+                                  placeholder="Describa brevemente lo realizado..."
+                                  @oninput="e => { _request.DetalleFinalizacion = e.Value?.ToString(); _detalleRequerido = false; }">@_request.DetalleFinalizacion</textarea>
+                        @if (_detalleRequerido)
+                        {
+                            <div class="invalid-feedback d-block">El detalle de finalización es obligatorio.</div>
+                        }
+                    </div>
+                }
+
+                <!-- Alerta -->
+                @if (!string.IsNullOrEmpty(_error))
+                {
+                    <div class="alert alert-danger alert-dismissible">
+                        @_error
+                        <button type="button" class="btn-close" @onclick="() => _error = null"></button>
+                    </div>
+                }
+
+                <!-- Acciones -->
+                <div class="d-flex gap-2 mt-2">
+                    <button class="btn @(_request.EsFinalizacion ? "btn-success" : "btn-warning")"
+                            @onclick="HandleBotonPrincipal"
+                            disabled="@_saving">
+                        @if (_saving)
+                        {
+                            <span class="spinner-border spinner-border-sm me-1"></span>
+                            <span>Guardando...</span>
+                        }
+                        else if (_request.EsFinalizacion)
+                        {
+                            <i class="bi bi-check-circle me-1"></i><span>Finalizar operación</span>
+                        }
+                        else
+                        {
+                            <i class="bi bi-pause-circle me-1"></i><span>Registrar pausa</span>
+                        }
+                    </button>
+                    <a href="/añadir-operacion/@OrdenId" class="btn btn-outline-secondary">
+                        <i class="bi bi-arrow-left me-1"></i>Volver
+                    </a>
+                </div>
+
+            </div>
+        </div>
+    }
+</div>
+
+<!-- Modal confirmación finalización -->
+@if (_confirmando)
+{
+    <div style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.5);z-index:1050;display:flex;align-items:center;justify-content:center">
+        <div style="background:#fff;border-radius:8px;padding:28px;max-width:440px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.3)">
+            <h5 class="mb-3"><i class="bi bi-exclamation-triangle-fill text-warning me-2"></i>Confirmar finalización</h5>
+            <p class="mb-1">¿Está seguro de que desea <strong>finalizar</strong> esta operación?</p>
+            @if (!string.IsNullOrEmpty(_duracionTexto))
+            {
+                <p class="text-muted small mb-0">Duración registrada: <strong>@_duracionTexto</strong></p>
+            }
+            <p class="text-muted small mt-1">Esta acción no se puede deshacer.</p>
+            <div class="d-flex justify-content-end gap-2 mt-3">
+                <button class="btn btn-outline-secondary" @onclick="() => _confirmando = false">Cancelar</button>
+                <button class="btn btn-success" @onclick="ConfirmarYGuardar" disabled="@_saving">
+                    @if (_saving) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                    Sí, finalizar
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public Guid OrdenId     { get; set; }
+    [Parameter] public Guid OperacionId { get; set; }
+
+    private OrdenTrabajoDto? _orden;
+    private OperacionDto?    _op;
+    private bool  _loading = true;
+    private bool  _saving;
+    private string? _error;
+
+    private RegistrarActividadRequest _request       = new() { FechaInicio = DateTime.Now };
+    private string _fechaInicioStr                   = string.Empty;
+    private string _fechaFinStr                      = string.Empty;
+    private string _motivoPausaStr                   = string.Empty;
+    private string _duracionTexto                    = string.Empty;
+    private string _errorFechaFin                    = string.Empty;
+    private bool   _detalleRequerido;
+    // Verdadero cuando la operación viene de una pausa previa y se está finalizando
+    private bool   _inicioDeshabilitado              => _request.EsFinalizacion && _op?.Estado == EstadoOperacion.Pausa;
+    private bool   _confirmando;
+
+    private List<FilaMaterial> _materiales           = [];
+    private List<MaterialDto>  _catalogoMateriales   = [];
+    private List<string>       _tiposMaterial        = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        var ordenResult = await OrdenTrabajoClient.GetOrdenByIdAsync(OrdenId);
+        if (ordenResult.IsSuccess)
+        {
+            _orden = ordenResult.Value;
+            _op    = _orden?.Operaciones.FirstOrDefault(o => o.Id == OperacionId);
+
+            _fechaInicioStr = _op?.FechaInicio.HasValue == true
+                ? _op.FechaInicio.Value.ToString("yyyy-MM-ddTHH:mm")
+                : DateTime.Now.ToString("yyyy-MM-ddTHH:mm");
+
+            if (_op?.FechaFin.HasValue == true)
+                _fechaFinStr = _op.FechaFin.Value.ToString("yyyy-MM-ddTHH:mm");
+
+            if (_op?.MotivoPausa.HasValue == true)
+                _motivoPausaStr = _op.MotivoPausa.Value.ToString();
+        }
+
+        try
+        {
+            _catalogoMateriales = (await MaterialClient.GetAllAsync(pageSize: 200)).ToList();
+            _tiposMaterial = _catalogoMateriales
+                .Select(m => m.TipoMaterial)
+                .Where(t => !string.IsNullOrWhiteSpace(t))
+                .Distinct()
+                .OrderBy(t => t)
+                .ToList();
+        }
+        catch { }
+
+        _loading = false;
+    }
+
+    private void ValidarFechaFin()
+    {
+        _errorFechaFin = string.Empty;
+        _duracionTexto = string.Empty;
+
+        if (!DateTime.TryParse(_fechaInicioStr, out var ini) ||
+            !DateTime.TryParse(_fechaFinStr,    out var fin))
+            return;
+
+        if (fin.Date < ini.Date)
+        {
+            _errorFechaFin = "La fecha de fin no puede ser anterior a la fecha de inicio.";
+            return;
+        }
+        if (fin <= ini)
+        {
+            _errorFechaFin = fin.Date == ini.Date
+                ? "Si es el mismo día, la hora de fin debe ser posterior a la hora de inicio."
+                : "La fecha y hora de fin deben ser posteriores al inicio.";
+            return;
+        }
+
+        // Válido: calcular duración
+        var d = fin - ini;
+        _duracionTexto = d.TotalHours >= 1
+            ? $"{(int)d.TotalHours} h {d.Minutes} min"
+            : $"{d.Minutes} min";
+    }
+
+    private void RecalcularDuracion() => ValidarFechaFin();
+
+    private async Task HandleBotonPrincipal()
+    {
+        if (_request.EsFinalizacion)
+            await PedirConfirmFinalizacion();
+        else
+            await Guardar();
+    }
+
+    private async Task PedirConfirmFinalizacion()
+    {
+        _error = null;
+        var hayErrores = false;
+
+        // Fecha inicio
+        if (!DateTime.TryParse(_fechaInicioStr, out _))
+        {
+            _error = "Corrija los errores para poder continuar: fecha de inicio inválida.";
+            hayErrores = true;
+        }
+
+        // Fecha fin
+        ValidarFechaFin();
+        if (!DateTime.TryParse(_fechaFinStr, out _) || !string.IsNullOrEmpty(_errorFechaFin))
+            hayErrores = true;
+
+        // Detalle obligatorio
+        if (string.IsNullOrWhiteSpace(_request.DetalleFinalizacion))
+        {
+            _detalleRequerido = true;
+            hayErrores = true;
+        }
+
+        if (hayErrores)
+        {
+            if (string.IsNullOrEmpty(_error))
+                _error = "Corrija los errores marcados en rojo para poder continuar.";
+            return;
+        }
+
+        _confirmando = true;
+        await Task.CompletedTask;
+    }
+
+    private async Task ConfirmarYGuardar()
+    {
+        _confirmando = false;
+        await Guardar();
+    }
+
+    // Cuando cambia el motivo, limpia los materiales si ya no aplica
+    private void OnMotivoPausaChanged(ChangeEventArgs e)
+    {
+        _motivoPausaStr = e.Value?.ToString() ?? string.Empty;
+        if (_motivoPausaStr != nameof(MotivoPausa.NecesidadEquipos))
+            _materiales.Clear();
+    }
+
+    private void AgregarFilaMaterial() =>
+        _materiales.Add(new FilaMaterial());
+
+    private void AgregarFilaPersonalizada() =>
+        _materiales.Add(new FilaMaterial { EsPersonalizado = true });
+
+    private IEnumerable<MaterialDto> MaterialesPorTipo(string tipo) =>
+        string.IsNullOrEmpty(tipo)
+            ? []
+            : _catalogoMateriales.Where(m => m.TipoMaterial == tipo);
+
+    private void OnTipoChanged(FilaMaterial fila, string? tipo)
+    {
+        fila.TipoMaterial   = tipo ?? string.Empty;
+        fila.MaterialId     = null;
+        fila.NombreMaterial = string.Empty;
+    }
+
+    private void OnMaterialSelected(FilaMaterial fila, string? value)
+    {
+        if (Guid.TryParse(value, out var id))
+        {
+            fila.MaterialId     = id;
+            fila.NombreMaterial = _catalogoMateriales.FirstOrDefault(m => m.Id == id)?.Nombre ?? string.Empty;
+        }
+        else
+        {
+            fila.MaterialId     = null;
+            fila.NombreMaterial = string.Empty;
+        }
+    }
+
+    private async Task Guardar()
+    {
+        _error = null;
+
+        if (!DateTime.TryParse(_fechaInicioStr, out var fechaInicio))
+        {
+            _error = "Ingrese una fecha y hora de inicio válida."; return;
+        }
+
+        if (_request.EsFinalizacion)
+        {
+            if (!DateTime.TryParse(_fechaFinStr, out var fechaFin))
+            {
+                _error = "Ingrese una fecha y hora de fin válida."; return;
+            }
+            if (fechaFin.Date < fechaInicio.Date)
+                { _error = "La fecha de fin no puede ser anterior a la fecha de inicio."; return; }
+            if (fechaFin <= fechaInicio)
+                { _error = fechaFin.Date == fechaInicio.Date
+                    ? "Si la fecha de fin es el mismo día, la hora de fin debe ser posterior a la hora de inicio."
+                    : "La fecha y hora de fin deben ser posteriores al inicio.";
+                  return; }
+            _request.FechaFin              = fechaFin;
+            _request.MotivoPausa           = null;
+            _request.MaterialesSolicitados = [];
+        }
+        else
+        {
+            if (string.IsNullOrEmpty(_motivoPausaStr) || !Enum.TryParse<MotivoPausa>(_motivoPausaStr, out var motivo))
+            {
+                _error = "Seleccione un motivo de pausa."; return;
+            }
+
+            _request.MotivoPausa = motivo;
+            _request.FechaFin    = null;
+
+            if (motivo == MotivoPausa.NecesidadEquipos)
+            {
+                if (!_materiales.Any())
+                {
+                    _error = "Agregue al menos un material solicitado."; return;
+                }
+                var filasInvalidas = _materiales.Where(m =>
+                    m.Cantidad < 1 ||
+                    (m.EsPersonalizado  && string.IsNullOrWhiteSpace(m.NombreMaterial)) ||
+                    (!m.EsPersonalizado && m.MaterialId == null)).ToList();
+                if (filasInvalidas.Any())
+                {
+                    _error = "Complete todos los campos: nombre y cantidad (≥ 1) en cada fila."; return;
+                }
+                _request.MaterialesSolicitados = _materiales.Select(m => new ItemSolicitudMaterial
+                {
+                    MaterialId      = m.MaterialId,
+                    NombreMaterial  = m.NombreMaterial,
+                    Cantidad        = m.Cantidad,
+                    EsPersonalizado = false
+                }).ToList();
+            }
+            else
+            {
+                _request.MaterialesSolicitados = [];
+            }
+        }
+
+        _request.FechaInicio = fechaInicio;
+
+        _saving = true;
+        var result = await OrdenTrabajoClient.RegistrarActividadAsync(OperacionId, _request);
+        _saving = false;
+
+        if (result.IsSuccess)
+            NavigationManager.NavigateTo($"/añadir-operacion/{OrdenId}");
+        else
+            _error = result.ErrorMessage ?? "Error al guardar la actividad.";
+    }
+
+    private static string GetEstadoOpBadge(EstadoOperacion e) => e switch
+    {
+        EstadoOperacion.Pendiente  => "bg-warning text-dark",
+        EstadoOperacion.EnProceso  => "bg-info text-dark",
+        EstadoOperacion.Pausa      => "bg-warning text-dark",
+        EstadoOperacion.Finalizada => "bg-success",
+        _ => "bg-secondary"
+    };
+
+    private static string GetOrdenBadge(EstadoOrden e) => e switch
+    {
+        EstadoOrden.Pendiente  => "bg-warning text-dark",
+        EstadoOrden.EnProceso  => "bg-info text-dark",
+        EstadoOrden.Finalizada => "bg-success",
+        EstadoOrden.Cancelada  => "bg-danger",
+        _ => "bg-secondary"
+    };
+
+    private static string GetMotivoPausaLabel(MotivoPausa m) => m switch
+    {
+        MotivoPausa.NecesidadEquipos    => "Necesidad de materiales",
+        MotivoPausa.FinTurno            => "Fin de turno",
+        MotivoPausa.FueraAlcance        => "Fuera de alcance",
+        MotivoPausa.EquipoNoDisponible  => "Equipo no disponible",
+        MotivoPausa.AtenderOtroServicio => "Atender otro servicio",
+        _ => m.ToString()
+    };
+
+    private class FilaMaterial
+    {
+        public bool    EsPersonalizado { get; set; }
+        public string  TipoMaterial    { get; set; } = string.Empty;
+        public Guid?   MaterialId      { get; set; }
+        public string  NombreMaterial  { get; set; } = string.Empty;
+        public int     Cantidad        { get; set; } = 1;
+    }
+}

@@ -1,0 +1,851 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FixOps — Sistema Inteligente de Gestión de Mantenimiento</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --purple: #7C3AED;
+      --purple-light: #A855F7;
+      --purple-dark: #5B21B6;
+      --indigo: #4F46E5;
+      --blue: #2563EB;
+      --cyan: #06B6D4;
+      --glass: rgba(255,255,255,0.07);
+      --glass-border: rgba(255,255,255,0.12);
+      --text: #F8F8FF;
+      --text-muted: #A0A8C0;
+      --card-bg: rgba(255,255,255,0.05);
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background: #070B14;
+      color: var(--text);
+      overflow-x: hidden;
+    }
+
+    /* ── ANIMATED BACKGROUND ── */
+    .bg-mesh {
+      position: fixed; inset: 0; z-index: 0; pointer-events: none;
+      background:
+        radial-gradient(ellipse 80% 60% at 10% 20%, rgba(124,58,237,0.25) 0%, transparent 60%),
+        radial-gradient(ellipse 60% 50% at 90% 80%, rgba(79,70,229,0.2) 0%, transparent 55%),
+        radial-gradient(ellipse 50% 40% at 50% 50%, rgba(6,182,212,0.08) 0%, transparent 60%),
+        #070B14;
+    }
+    .orb {
+      position: fixed; border-radius: 50%; filter: blur(80px); pointer-events: none; z-index: 0;
+      animation: float 12s ease-in-out infinite;
+    }
+    .orb-1 { width: 500px; height: 500px; top: -100px; left: -100px; background: rgba(124,58,237,0.15); animation-delay: 0s; }
+    .orb-2 { width: 400px; height: 400px; bottom: 100px; right: -100px; background: rgba(79,70,229,0.15); animation-delay: -4s; }
+    .orb-3 { width: 300px; height: 300px; top: 50%; left: 50%; background: rgba(6,182,212,0.08); animation-delay: -8s; }
+
+    @keyframes float {
+      0%, 100% { transform: translateY(0) scale(1); }
+      50%       { transform: translateY(-40px) scale(1.05); }
+    }
+
+    /* ── LAYOUT ── */
+    .container { max-width: 1180px; margin: 0 auto; padding: 0 24px; position: relative; z-index: 1; }
+
+    /* ── FLOATING CTA ── */
+    .floating-cta {
+      position: fixed; right: 28px; top: 50%; transform: translateY(-50%);
+      z-index: 999; display: flex; flex-direction: column; align-items: center; gap: 10px;
+    }
+    .floating-cta a {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      width: 72px; height: 72px; border-radius: 50%;
+      background: linear-gradient(135deg, var(--purple), var(--indigo));
+      color: #fff; font-weight: 800; font-size: 0.7rem; text-decoration: none;
+      letter-spacing: 0.05em; text-transform: uppercase; line-height: 1.2; text-align: center;
+      box-shadow: 0 0 30px rgba(124,58,237,0.6), 0 4px 20px rgba(0,0,0,0.4);
+      transition: transform 0.2s, box-shadow 0.2s;
+      animation: pulse-cta 2.5s ease-in-out infinite;
+    }
+    .floating-cta a span { font-size: 1.3rem; display: block; margin-bottom: 2px; }
+    .floating-cta a:hover { transform: scale(1.1); box-shadow: 0 0 50px rgba(124,58,237,0.8), 0 8px 30px rgba(0,0,0,0.5); }
+    .floating-label { font-size: 0.65rem; color: var(--text-muted); writing-mode: vertical-rl; text-orientation: mixed; letter-spacing: 0.15em; text-transform: uppercase; }
+
+    @keyframes pulse-cta {
+      0%, 100% { box-shadow: 0 0 30px rgba(124,58,237,0.6), 0 4px 20px rgba(0,0,0,0.4); }
+      50%       { box-shadow: 0 0 60px rgba(124,58,237,0.9), 0 8px 40px rgba(0,0,0,0.5); }
+    }
+
+    /* ── NAV ── */
+    nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      padding: 16px 0;
+      background: rgba(7,11,20,0.7);
+      backdrop-filter: blur(20px);
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+      transition: background 0.3s;
+    }
+    nav .inner { display: flex; align-items: center; justify-content: space-between; }
+    nav img { height: 36px; filter: drop-shadow(0 0 12px rgba(168,85,247,0.5)); }
+    nav .nav-links { display: flex; align-items: center; gap: 32px; }
+    nav .nav-links a { color: var(--text-muted); text-decoration: none; font-size: 0.9rem; font-weight: 500; transition: color 0.2s; }
+    nav .nav-links a:hover { color: #fff; }
+    .btn-nav {
+      padding: 9px 22px; border-radius: 50px;
+      background: linear-gradient(135deg, var(--purple), var(--indigo));
+      color: #fff !important; font-weight: 600; font-size: 0.88rem !important;
+      box-shadow: 0 0 20px rgba(124,58,237,0.4);
+      transition: box-shadow 0.2s, transform 0.2s !important;
+    }
+    .btn-nav:hover { box-shadow: 0 0 35px rgba(124,58,237,0.7) !important; transform: translateY(-1px); }
+
+    /* ── HERO ── */
+    .hero {
+      min-height: 100vh; display: flex; align-items: center;
+      padding: 120px 0 80px;
+    }
+    .hero-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 60px; align-items: center; }
+    .badge {
+      display: inline-flex; align-items: center; gap: 8px;
+      background: rgba(124,58,237,0.15); border: 1px solid rgba(124,58,237,0.3);
+      border-radius: 50px; padding: 6px 16px; font-size: 0.8rem; font-weight: 600;
+      color: var(--purple-light); margin-bottom: 24px;
+      animation: fadeUp 0.6s ease both;
+    }
+    .badge::before { content: '●'; font-size: 0.6rem; animation: blink 1.5s ease infinite; }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+    h1 {
+      font-size: clamp(2.6rem, 5vw, 4rem); font-weight: 900; line-height: 1.1;
+      letter-spacing: -0.02em; margin-bottom: 24px;
+      animation: fadeUp 0.6s 0.1s ease both;
+    }
+    h1 .gradient-text {
+      background: linear-gradient(135deg, var(--purple-light), var(--cyan));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    }
+    .hero-desc {
+      font-size: 1.1rem; color: var(--text-muted); line-height: 1.8;
+      margin-bottom: 40px; max-width: 520px;
+      animation: fadeUp 0.6s 0.2s ease both;
+    }
+    .hero-buttons { display: flex; gap: 16px; flex-wrap: wrap; animation: fadeUp 0.6s 0.3s ease both; }
+    .btn-primary {
+      padding: 14px 32px; border-radius: 50px; font-weight: 700; font-size: 1rem;
+      background: linear-gradient(135deg, var(--purple), var(--indigo));
+      color: #fff; text-decoration: none; display: inline-flex; align-items: center; gap: 8px;
+      box-shadow: 0 0 40px rgba(124,58,237,0.5), 0 4px 20px rgba(0,0,0,0.3);
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 0 60px rgba(124,58,237,0.7), 0 8px 30px rgba(0,0,0,0.4); }
+    .btn-secondary {
+      padding: 14px 32px; border-radius: 50px; font-weight: 600; font-size: 1rem;
+      border: 1px solid var(--glass-border); color: var(--text);
+      text-decoration: none; display: inline-flex; align-items: center; gap: 8px;
+      background: var(--glass); backdrop-filter: blur(10px);
+      transition: border-color 0.2s, background 0.2s, transform 0.2s;
+    }
+    .btn-secondary:hover { border-color: rgba(124,58,237,0.5); background: rgba(124,58,237,0.1); transform: translateY(-2px); }
+
+    /* ── HERO VISUAL ── */
+    .hero-visual { position: relative; animation: fadeUp 0.6s 0.25s ease both; }
+    .dashboard-mockup {
+      background: rgba(255,255,255,0.04);
+      border: 1px solid var(--glass-border);
+      border-radius: 20px;
+      padding: 20px;
+      backdrop-filter: blur(10px);
+      box-shadow: 0 40px 80px rgba(0,0,0,0.5), 0 0 60px rgba(124,58,237,0.1);
+    }
+    .mockup-bar { display: flex; gap: 6px; margin-bottom: 16px; }
+    .mockup-dot { width: 10px; height: 10px; border-radius: 50%; }
+    .d-red { background: #FF5F57; }
+    .d-yellow { background: #FFBD2E; }
+    .d-green { background: #27C840; }
+    .mockup-content { display: flex; flex-direction: column; gap: 12px; }
+    .kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+    .kpi-card {
+      background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 12px; padding: 14px 12px; text-align: center;
+    }
+    .kpi-card .kpi-val { font-size: 1.4rem; font-weight: 800; color: var(--purple-light); }
+    .kpi-card .kpi-lbl { font-size: 0.62rem; color: var(--text-muted); margin-top: 4px; text-transform: uppercase; letter-spacing: 0.06em; }
+    .order-list { display: flex; flex-direction: column; gap: 8px; }
+    .order-row {
+      display: flex; align-items: center; gap: 10px;
+      background: rgba(255,255,255,0.04); border-radius: 8px; padding: 10px 12px;
+      font-size: 0.75rem; color: var(--text-muted);
+    }
+    .order-row .folio { color: var(--purple-light); font-weight: 700; width: 70px; flex-shrink: 0; }
+    .order-row .desc { flex: 1; }
+    .status-chip {
+      padding: 3px 10px; border-radius: 50px; font-size: 0.65rem; font-weight: 600; flex-shrink: 0;
+    }
+    .s-p { background: rgba(251,191,36,0.15); color: #FBB824; }
+    .s-e { background: rgba(124,58,237,0.2); color: #A78BFA; }
+    .s-f { background: rgba(16,185,129,0.15); color: #34D399; }
+    .chart-placeholder {
+      height: 80px; background: rgba(255,255,255,0.03); border-radius: 10px;
+      display: flex; align-items: flex-end; padding: 10px 12px; gap: 8px; overflow: hidden;
+    }
+    .bar { border-radius: 4px 4px 0 0; background: linear-gradient(to top, var(--purple), var(--purple-light)); flex: 1; opacity: 0.8; }
+
+    /* ── STATS ── */
+    .stats-section { padding: 60px 0; border-top: 1px solid rgba(255,255,255,0.06); border-bottom: 1px solid rgba(255,255,255,0.06); }
+    .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 2px; }
+    .stat-item { text-align: center; padding: 20px; }
+    .stat-num { font-size: 2.8rem; font-weight: 900; background: linear-gradient(135deg, var(--purple-light), var(--cyan)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+    .stat-lbl { font-size: 0.85rem; color: var(--text-muted); margin-top: 6px; }
+
+    /* ── SECTIONS SHARED ── */
+    section { padding: 100px 0; }
+    .section-tag {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: rgba(124,58,237,0.12); border: 1px solid rgba(124,58,237,0.25);
+      border-radius: 50px; padding: 5px 14px; font-size: 0.75rem; font-weight: 600;
+      color: var(--purple-light); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 16px;
+    }
+    .section-title { font-size: clamp(1.8rem, 3.5vw, 2.8rem); font-weight: 800; line-height: 1.2; margin-bottom: 16px; letter-spacing: -0.02em; }
+    .section-desc { font-size: 1.05rem; color: var(--text-muted); line-height: 1.8; max-width: 580px; }
+    .text-center { text-align: center; }
+    .text-center .section-desc { margin: 0 auto; }
+
+    /* ── PROBLEM ── */
+    .problem-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 60px; align-items: center; }
+    .pain-list { display: flex; flex-direction: column; gap: 20px; margin-top: 40px; }
+    .pain-item {
+      display: flex; gap: 16px; align-items: flex-start;
+      background: var(--card-bg); border: 1px solid var(--glass-border);
+      border-radius: 16px; padding: 20px;
+      transition: border-color 0.3s, background 0.3s;
+    }
+    .pain-item:hover { border-color: rgba(124,58,237,0.3); background: rgba(124,58,237,0.05); }
+    .pain-icon { font-size: 1.8rem; flex-shrink: 0; }
+    .pain-title { font-weight: 700; font-size: 0.95rem; margin-bottom: 6px; }
+    .pain-desc { font-size: 0.87rem; color: var(--text-muted); line-height: 1.6; }
+    .solution-visual {
+      background: var(--card-bg); border: 1px solid var(--glass-border);
+      border-radius: 24px; padding: 36px; display: flex; flex-direction: column; gap: 20px;
+    }
+    .solution-tag { font-size: 0.75rem; color: var(--purple-light); font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 8px; }
+    .solution-flow { display: flex; flex-direction: column; gap: 4px; }
+    .flow-step {
+      display: flex; align-items: center; gap: 12px;
+      background: rgba(255,255,255,0.04); border-radius: 10px; padding: 12px 16px;
+      font-size: 0.85rem;
+    }
+    .flow-step .step-num { width: 26px; height: 26px; border-radius: 50%; background: linear-gradient(135deg, var(--purple), var(--indigo)); display: flex; align-items: center; justify-content: center; font-size: 0.7rem; font-weight: 800; flex-shrink: 0; }
+    .flow-arrow { text-align: center; color: rgba(124,58,237,0.5); font-size: 1.1rem; }
+
+    /* ── FEATURES ── */
+    .features-section { background: radial-gradient(ellipse 70% 60% at 50% 50%, rgba(124,58,237,0.06) 0%, transparent 70%); }
+    .features-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; margin-top: 60px; }
+    .feature-card {
+      background: var(--card-bg); border: 1px solid var(--glass-border);
+      border-radius: 20px; padding: 28px; position: relative; overflow: hidden;
+      transition: border-color 0.3s, transform 0.3s, box-shadow 0.3s;
+    }
+    .feature-card::before {
+      content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(124,58,237,0.5), transparent);
+      opacity: 0; transition: opacity 0.3s;
+    }
+    .feature-card:hover { border-color: rgba(124,58,237,0.3); transform: translateY(-4px); box-shadow: 0 20px 50px rgba(0,0,0,0.3), 0 0 30px rgba(124,58,237,0.1); }
+    .feature-card:hover::before { opacity: 1; }
+    .feature-icon {
+      width: 52px; height: 52px; border-radius: 14px; margin-bottom: 20px;
+      background: linear-gradient(135deg, rgba(124,58,237,0.2), rgba(79,70,229,0.2));
+      border: 1px solid rgba(124,58,237,0.2); display: flex; align-items: center; justify-content: center;
+      font-size: 1.5rem;
+    }
+    .feature-card h3 { font-size: 1rem; font-weight: 700; margin-bottom: 10px; }
+    .feature-card p { font-size: 0.87rem; color: var(--text-muted); line-height: 1.7; }
+
+    /* ── AUDIENCE ── */
+    .audience-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-top: 56px; }
+    .audience-card {
+      background: var(--card-bg); border: 1px solid var(--glass-border);
+      border-radius: 20px; padding: 28px 22px; text-align: center;
+      transition: border-color 0.3s, transform 0.3s;
+    }
+    .audience-card:hover { border-color: rgba(124,58,237,0.4); transform: translateY(-4px); }
+    .audience-emoji { font-size: 2.5rem; margin-bottom: 16px; display: block; }
+    .audience-card h3 { font-size: 0.95rem; font-weight: 700; margin-bottom: 10px; }
+    .audience-card p { font-size: 0.82rem; color: var(--text-muted); line-height: 1.6; }
+
+    /* ── ROLES ── */
+    .roles-section { background: rgba(0,0,0,0.3); }
+    .roles-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; margin-top: 56px; }
+    .role-card {
+      display: flex; gap: 20px; align-items: flex-start;
+      background: var(--card-bg); border: 1px solid var(--glass-border);
+      border-radius: 20px; padding: 28px;
+      transition: border-color 0.3s;
+    }
+    .role-card:hover { border-color: rgba(124,58,237,0.3); }
+    .role-icon { font-size: 2rem; flex-shrink: 0; }
+    .role-badge { display: inline-block; padding: 2px 10px; border-radius: 50px; font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px; }
+    .rb-admin { background: rgba(239,68,68,0.15); color: #F87171; }
+    .rb-tech { background: rgba(6,182,212,0.15); color: #22D3EE; }
+    .rb-sol { background: rgba(251,191,36,0.15); color: #FBB824; }
+    .rb-prog { background: rgba(16,185,129,0.15); color: #34D399; }
+    .role-card h3 { font-size: 1rem; font-weight: 700; margin-bottom: 8px; }
+    .role-card p { font-size: 0.86rem; color: var(--text-muted); line-height: 1.6; }
+    .role-perms { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+    .perm-tag { background: rgba(255,255,255,0.06); border-radius: 50px; padding: 3px 10px; font-size: 0.7rem; color: var(--text-muted); }
+
+    /* ── API SECTION ── */
+    .api-section { position: relative; overflow: hidden; }
+    .api-section::before {
+      content: ''; position: absolute; inset: 0;
+      background: radial-gradient(ellipse 60% 80% at 50% 50%, rgba(6,182,212,0.06) 0%, transparent 70%);
+    }
+    .api-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 60px; align-items: center; }
+    .api-features { display: flex; flex-direction: column; gap: 20px; margin-top: 40px; }
+    .api-feature { display: flex; gap: 14px; align-items: flex-start; }
+    .api-check {
+      width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0; margin-top: 2px;
+      background: linear-gradient(135deg, rgba(6,182,212,0.3), rgba(79,70,229,0.3));
+      border: 1px solid rgba(6,182,212,0.3); display: flex; align-items: center; justify-content: center;
+      font-size: 0.8rem;
+    }
+    .api-feature h4 { font-size: 0.9rem; font-weight: 700; margin-bottom: 4px; }
+    .api-feature p { font-size: 0.83rem; color: var(--text-muted); line-height: 1.6; }
+
+    .api-card {
+      background: rgba(0,0,0,0.4); border: 1px solid rgba(6,182,212,0.2);
+      border-radius: 20px; overflow: hidden;
+      box-shadow: 0 0 60px rgba(6,182,212,0.08), 0 40px 80px rgba(0,0,0,0.4);
+    }
+    .api-card-header {
+      background: rgba(6,182,212,0.08); border-bottom: 1px solid rgba(6,182,212,0.15);
+      padding: 14px 20px; display: flex; align-items: center; gap: 10px;
+    }
+    .api-card-header span { font-size: 0.78rem; color: #22D3EE; font-weight: 600; font-family: monospace; }
+    .api-pill { padding: 3px 10px; border-radius: 4px; font-size: 0.68rem; font-weight: 700; font-family: monospace; }
+    .m-get { background: rgba(16,185,129,0.2); color: #34D399; }
+    .m-post { background: rgba(251,191,36,0.2); color: #FBB824; }
+    .m-put { background: rgba(79,70,229,0.2); color: #818CF8; }
+    .m-del { background: rgba(239,68,68,0.2); color: #F87171; }
+    .api-endpoints { padding: 8px; display: flex; flex-direction: column; gap: 2px; }
+    .endpoint {
+      display: flex; align-items: center; gap: 12px;
+      padding: 10px 14px; border-radius: 8px; font-family: monospace;
+      font-size: 0.78rem; color: var(--text-muted);
+      transition: background 0.2s;
+    }
+    .endpoint:hover { background: rgba(255,255,255,0.04); }
+    .endpoint .path { flex: 1; }
+    .swagger-btn {
+      display: flex; align-items: center; justify-content: center; gap: 10px;
+      margin: 16px; padding: 14px; border-radius: 12px;
+      background: linear-gradient(135deg, rgba(6,182,212,0.15), rgba(79,70,229,0.15));
+      border: 1px solid rgba(6,182,212,0.25); color: #22D3EE;
+      text-decoration: none; font-weight: 700; font-size: 0.9rem;
+      transition: background 0.2s, border-color 0.2s, transform 0.2s;
+    }
+    .swagger-btn:hover { background: linear-gradient(135deg, rgba(6,182,212,0.25), rgba(79,70,229,0.25)); border-color: rgba(6,182,212,0.5); transform: translateY(-1px); }
+    .swagger-icon { font-size: 1.2rem; }
+
+    /* ── FINAL CTA ── */
+    .cta-section { text-align: center; padding: 120px 0; }
+    .cta-glow {
+      position: relative; display: inline-block;
+      background: linear-gradient(135deg, rgba(124,58,237,0.15), rgba(79,70,229,0.15));
+      border: 1px solid rgba(124,58,237,0.2);
+      border-radius: 32px; padding: 80px 60px;
+      backdrop-filter: blur(10px);
+    }
+    .cta-glow::before {
+      content: ''; position: absolute; inset: -1px; border-radius: 32px;
+      background: linear-gradient(135deg, rgba(124,58,237,0.3), rgba(6,182,212,0.2));
+      z-index: -1; filter: blur(20px);
+    }
+    .cta-section h2 { font-size: clamp(2rem, 4vw, 3rem); font-weight: 900; line-height: 1.15; margin-bottom: 20px; letter-spacing: -0.02em; }
+    .cta-section p { font-size: 1.1rem; color: var(--text-muted); margin-bottom: 40px; }
+    .cta-buttons { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; }
+
+    /* ── FOOTER ── */
+    footer {
+      border-top: 1px solid rgba(255,255,255,0.06);
+      padding: 40px 0; color: var(--text-muted); font-size: 0.85rem;
+    }
+    footer .inner { display: flex; align-items: center; justify-content: space-between; }
+    footer img { height: 28px; opacity: 0.6; }
+    footer .footer-links { display: flex; gap: 24px; }
+    footer .footer-links a { color: var(--text-muted); text-decoration: none; transition: color 0.2s; }
+    footer .footer-links a:hover { color: #fff; }
+
+    /* ── ANIMATIONS ── */
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(24px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .reveal { opacity: 0; transform: translateY(30px); transition: opacity 0.6s ease, transform 0.6s ease; }
+    .reveal.visible { opacity: 1; transform: translateY(0); }
+
+    /* ── RESPONSIVE ── */
+    @media (max-width: 900px) {
+      .hero-grid, .problem-grid, .api-grid { grid-template-columns: 1fr; }
+      .hero-visual { display: none; }
+      .features-grid { grid-template-columns: repeat(2, 1fr); }
+      .audience-grid { grid-template-columns: repeat(2, 1fr); }
+      .roles-grid { grid-template-columns: 1fr; }
+      .stats-grid { grid-template-columns: repeat(2, 1fr); }
+      .floating-cta { display: none; }
+      nav .nav-links { gap: 16px; }
+    }
+    @media (max-width: 600px) {
+      .features-grid, .audience-grid { grid-template-columns: 1fr; }
+      nav .nav-links a:not(.btn-nav) { display: none; }
+      .cta-glow { padding: 50px 24px; }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="bg-mesh"></div>
+  <div class="orb orb-1"></div>
+  <div class="orb orb-2"></div>
+  <div class="orb orb-3"></div>
+
+  <!-- FLOATING CTA -->
+  <div class="floating-cta">
+    <a href="/login">
+      <span>🚀</span>
+      Probar
+    </a>
+    <span class="floating-label">Acceso</span>
+  </div>
+
+  <!-- NAV -->
+  <nav>
+    <div class="container inner">
+      <img src="fixops-logo.png" alt="FixOps" />
+      <div class="nav-links">
+        <a href="#problema">Problema</a>
+        <a href="#funcionalidades">Funcionalidades</a>
+        <a href="#audiencia">Para quién</a>
+        <a href="#api">API</a>
+        <a href="/login" class="btn-nav">Probar gratis →</a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- HERO -->
+  <section class="hero">
+    <div class="container">
+      <div class="hero-grid">
+        <div>
+          <div class="badge">✦ Plataforma de Mantenimiento Industrial</div>
+          <h1>El caos en el<br/><span class="gradient-text">mantenimiento</span><br/>ya tiene solución.</h1>
+          <p class="hero-desc">
+            FixOps digitaliza y centraliza toda la gestión de órdenes de trabajo, técnicos y activos.
+            Desde la solicitud hasta el cierre — con trazabilidad total, métricas en tiempo real
+            e integración con tus sistemas existentes vía API REST.
+          </p>
+          <div class="hero-buttons">
+            <a href="/login" class="btn-primary">🚀 Comenzar ahora — Es gratis</a>
+            <a href="http://localhost:5284/swagger" target="_blank" class="btn-secondary">📄 Ver documentación API</a>
+          </div>
+        </div>
+        <div class="hero-visual">
+          <div class="dashboard-mockup">
+            <div class="mockup-bar">
+              <div class="mockup-dot d-red"></div>
+              <div class="mockup-dot d-yellow"></div>
+              <div class="mockup-dot d-green"></div>
+            </div>
+            <div class="mockup-content">
+              <div class="kpi-row">
+                <div class="kpi-card"><div class="kpi-val">247</div><div class="kpi-lbl">Órdenes</div></div>
+                <div class="kpi-card"><div class="kpi-val">18</div><div class="kpi-lbl">En proceso</div></div>
+                <div class="kpi-card"><div class="kpi-val">4.8★</div><div class="kpi-lbl">Satisfacción</div></div>
+                <div class="kpi-card"><div class="kpi-val">2.3h</div><div class="kpi-lbl">T. promedio</div></div>
+              </div>
+              <div class="order-list">
+                <div class="order-row"><span class="folio">OT-00124</span><span class="desc">Falla eléctrica panel 3</span><span class="status-chip s-e">En proceso</span></div>
+                <div class="order-row"><span class="folio">OT-00125</span><span class="desc">Revisión HVAC piso 4</span><span class="status-chip s-p">Pendiente</span></div>
+                <div class="order-row"><span class="folio">OT-00123</span><span class="desc">Cambio luminaria sala B</span><span class="status-chip s-f">Finalizada</span></div>
+                <div class="order-row"><span class="folio">OT-00122</span><span class="desc">Mantenimiento ascensor</span><span class="status-chip s-f">Finalizada</span></div>
+              </div>
+              <div class="chart-placeholder">
+                <div class="bar" style="height:40%"></div>
+                <div class="bar" style="height:65%"></div>
+                <div class="bar" style="height:50%"></div>
+                <div class="bar" style="height:80%"></div>
+                <div class="bar" style="height:55%"></div>
+                <div class="bar" style="height:90%"></div>
+                <div class="bar" style="height:70%"></div>
+                <div class="bar" style="height:60%"></div>
+                <div class="bar" style="height:75%"></div>
+                <div class="bar" style="height:85%"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- STATS -->
+  <div class="stats-section">
+    <div class="container">
+      <div class="stats-grid">
+        <div class="stat-item reveal">
+          <div class="stat-num">100%</div>
+          <div class="stat-lbl">Digital — sin papel, sin Excel</div>
+        </div>
+        <div class="stat-item reveal">
+          <div class="stat-num">4 roles</div>
+          <div class="stat-lbl">Control de acceso granular</div>
+        </div>
+        <div class="stat-item reveal">
+          <div class="stat-num">REST</div>
+          <div class="stat-lbl">API abierta e integrable</div>
+        </div>
+        <div class="stat-item reveal">
+          <div class="stat-num">∞</div>
+          <div class="stat-lbl">Órdenes sin restricción</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PROBLEMA -->
+  <section id="problema">
+    <div class="container">
+      <div class="problem-grid">
+        <div>
+          <div class="section-tag">⚡ El problema</div>
+          <h2 class="section-title">¿Cuántas veces se perdió una solicitud de mantenimiento?</h2>
+          <p class="section-desc">Los equipos de mantenimiento siguen atrapados entre WhatsApp, correos y hojas de cálculo. El resultado: órdenes sin atender, técnicos sin visibilidad y directivos sin datos.</p>
+          <div class="pain-list">
+            <div class="pain-item reveal">
+              <div class="pain-icon">📋</div>
+              <div>
+                <div class="pain-title">Solicitudes que desaparecen</div>
+                <div class="pain-desc">Sin un canal formal, las peticiones de mantenimiento se pierden entre chats y emails. Nadie sabe quién atiende qué.</div>
+              </div>
+            </div>
+            <div class="pain-item reveal">
+              <div class="pain-icon">⏱️</div>
+              <div>
+                <div class="pain-title">Sin métricas de desempeño</div>
+                <div class="pain-desc">¿Cuánto tarda un técnico en resolver una falla? ¿Qué regional tiene más incidencias? Imposible saberlo sin datos estructurados.</div>
+              </div>
+            </div>
+            <div class="pain-item reveal">
+              <div class="pain-icon">🔒</div>
+              <div>
+                <div class="pain-title">Sin control de acceso</div>
+                <div class="pain-desc">Cualquiera puede ver (o modificar) cualquier cosa. No hay separación entre roles ni trazabilidad de quién hizo qué.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="solution-visual reveal">
+          <div>
+            <div class="solution-tag">✅ Con FixOps</div>
+            <div class="solution-flow">
+              <div class="flow-step"><div class="step-num">1</div>Solicitante crea la orden en segundos</div>
+              <div class="flow-arrow">↓</div>
+              <div class="flow-step"><div class="step-num">2</div>Administrador asigna técnico y prioridad</div>
+              <div class="flow-arrow">↓</div>
+              <div class="flow-step"><div class="step-num">3</div>Técnico registra operaciones y materiales</div>
+              <div class="flow-arrow">↓</div>
+              <div class="flow-step"><div class="step-num">4</div>Cierre con encuesta de satisfacción</div>
+              <div class="flow-arrow">↓</div>
+              <div class="flow-step"><div class="step-num">5</div>Dashboard con métricas en tiempo real</div>
+            </div>
+          </div>
+          <div style="background:rgba(124,58,237,0.06);border:1px solid rgba(124,58,237,0.15);border-radius:14px;padding:20px;margin-top:20px;">
+            <div style="font-size:0.75rem;color:var(--purple-light);font-weight:700;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:12px;">Trazabilidad completa</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <span style="background:rgba(255,255,255,0.05);border-radius:50px;padding:4px 12px;font-size:0.75rem;color:var(--text-muted);">📍 Quién creó</span>
+              <span style="background:rgba(255,255,255,0.05);border-radius:50px;padding:4px 12px;font-size:0.75rem;color:var(--text-muted);">🕐 Cuándo</span>
+              <span style="background:rgba(255,255,255,0.05);border-radius:50px;padding:4px 12px;font-size:0.75rem;color:var(--text-muted);">🔧 Quién reparó</span>
+              <span style="background:rgba(255,255,255,0.05);border-radius:50px;padding:4px 12px;font-size:0.75rem;color:var(--text-muted);">🏢 Qué regional</span>
+              <span style="background:rgba(255,255,255,0.05);border-radius:50px;padding:4px 12px;font-size:0.75rem;color:var(--text-muted);">📦 Materiales usados</span>
+              <span style="background:rgba(255,255,255,0.05);border-radius:50px;padding:4px 12px;font-size:0.75rem;color:var(--text-muted);">⭐ Calificación</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FUNCIONALIDADES -->
+  <section id="funcionalidades" class="features-section">
+    <div class="container">
+      <div class="text-center">
+        <div class="section-tag">⚙️ Funcionalidades</div>
+        <h2 class="section-title">Todo lo que necesita un equipo de mantenimiento serio</h2>
+        <p class="section-desc">Diseñado para operaciones reales, no para demos. Cada función resuelve un problema concreto del día a día.</p>
+      </div>
+      <div class="features-grid">
+        <div class="feature-card reveal">
+          <div class="feature-icon">📋</div>
+          <h3>Gestión de Órdenes de Trabajo</h3>
+          <p>Crea, asigna y hace seguimiento de órdenes con prioridades, estados y folio único. Historial completo en un solo lugar.</p>
+        </div>
+        <div class="feature-card reveal">
+          <div class="feature-icon">👷</div>
+          <h3>Panel del Técnico</h3>
+          <p>Cada técnico ve solo sus órdenes asignadas, registra operaciones paso a paso y actualiza el estado en campo desde cualquier dispositivo.</p>
+        </div>
+        <div class="feature-card reveal">
+          <div class="feature-icon">📅</div>
+          <h3>Horario de Trabajo</h3>
+          <p>Visualización de calendario de órdenes asignadas para una gestión eficiente del tiempo y la carga de trabajo.</p>
+        </div>
+        <div class="feature-card reveal">
+          <div class="feature-icon">📦</div>
+          <h3>Inventario de Materiales</h3>
+          <p>Catálogo de materiales con stock, precio unitario y control de uso por operación. Carga masiva por Excel incluida.</p>
+        </div>
+        <div class="feature-card reveal">
+          <div class="feature-icon">⭐</div>
+          <h3>Encuestas de Satisfacción</h3>
+          <p>Al cerrar cada orden, el solicitante califica la atención, el servicio y el tiempo. Datos reales para mejorar continuamente.</p>
+        </div>
+        <div class="feature-card reveal">
+          <div class="feature-icon">📊</div>
+          <h3>Analítica e Indicadores</h3>
+          <p>Dashboard interactivo con KPIs, gráficos de tendencia, desempeño por regional y técnico. Filtros por período y zona.</p>
+        </div>
+        <div class="feature-card reveal">
+          <div class="feature-icon">🏢</div>
+          <h3>Gestión de Dependencias</h3>
+          <p>Administra todas las sedes, regionales o departamentos con sus contactos, carga masiva por Excel y vinculación a órdenes.</p>
+        </div>
+        <div class="feature-card reveal">
+          <div class="feature-icon">🔐</div>
+          <h3>Control de Roles y Accesos</h3>
+          <p>Cuatro roles diferenciados (Administrador, Técnico, Programador, Solicitante) con acceso granular a cada módulo.</p>
+        </div>
+        <div class="feature-card reveal">
+          <div class="feature-icon">📤</div>
+          <h3>Carga Masiva por Excel</h3>
+          <p>Importa usuarios, técnicos, programadores y dependencias desde plantillas Excel con validación previa y reporte de errores.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- AUDIENCIA -->
+  <section id="audiencia">
+    <div class="container">
+      <div class="text-center">
+        <div class="section-tag">🎯 Público objetivo</div>
+        <h2 class="section-title">¿Tu organización gestiona activos, instalaciones o infraestructura?</h2>
+        <p class="section-desc">FixOps está diseñado para cualquier organización con un equipo de mantenimiento que requiera orden, trazabilidad y reportes.</p>
+      </div>
+      <div class="audience-grid">
+        <div class="audience-card reveal">
+          <span class="audience-emoji">🏛️</span>
+          <h3>Entidades Públicas</h3>
+          <p>Alcaldías, gobernaciones, ministerios con múltiples sedes y decenas de técnicos. Control centralizado con multi-regional.</p>
+        </div>
+        <div class="audience-card reveal">
+          <span class="audience-emoji">🏥</span>
+          <h3>Clínicas y Hospitales</h3>
+          <p>Mantenimiento de equipos biomédicos, instalaciones eléctricas e infraestructura crítica con trazabilidad total.</p>
+        </div>
+        <div class="audience-card reveal">
+          <span class="audience-emoji">🏫</span>
+          <h3>Universidades e Institutos</h3>
+          <p>Gestión de múltiples campus, laboratorios, aulas y edificios administrativos con equipos técnicos por sede.</p>
+        </div>
+        <div class="audience-card reveal">
+          <span class="audience-emoji">🏭</span>
+          <h3>Empresas Industriales</h3>
+          <p>Manufactura, logística y plantas de producción que necesitan tiempo de respuesta medido y costos por operación.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ROLES -->
+  <section class="roles-section">
+    <div class="container">
+      <div class="text-center">
+        <div class="section-tag">👥 Roles del sistema</div>
+        <h2 class="section-title">Cada persona, en su lugar</h2>
+        <p class="section-desc">FixOps adapta la experiencia según el rol. Cada usuario ve exactamente lo que necesita — ni más, ni menos.</p>
+      </div>
+      <div class="roles-grid">
+        <div class="role-card reveal">
+          <div class="role-icon">🛡️</div>
+          <div>
+            <span class="role-badge rb-admin">Administrador</span>
+            <h3>Control total del sistema</h3>
+            <p>Gestiona usuarios, dependencias, materiales, configuración del sistema y tiene acceso a toda la analítica e informes.</p>
+            <div class="role-perms">
+              <span class="perm-tag">Maestros</span><span class="perm-tag">Analítica</span><span class="perm-tag">Configuración</span><span class="perm-tag">Carga masiva</span>
+            </div>
+          </div>
+        </div>
+        <div class="role-card reveal">
+          <div class="role-icon">🔧</div>
+          <div>
+            <span class="role-badge rb-tech">Técnico</span>
+            <h3>Foco en el trabajo de campo</h3>
+            <p>Ve sus órdenes asignadas, registra operaciones, consume materiales del inventario y actualiza el estado en tiempo real.</p>
+            <div class="role-perms">
+              <span class="perm-tag">Mis órdenes</span><span class="perm-tag">Horario</span><span class="perm-tag">Operaciones</span>
+            </div>
+          </div>
+        </div>
+        <div class="role-card reveal">
+          <div class="role-icon">📝</div>
+          <div>
+            <span class="role-badge rb-sol">Solicitante</span>
+            <h3>Reporta y hace seguimiento</h3>
+            <p>Crea nuevas órdenes de trabajo, hace seguimiento del estado y califica el servicio al finalizar con encuesta de satisfacción.</p>
+            <div class="role-perms">
+              <span class="perm-tag">Crear orden</span><span class="perm-tag">Mis solicitudes</span><span class="perm-tag">Encuesta</span>
+            </div>
+          </div>
+        </div>
+        <div class="role-card reveal">
+          <div class="role-icon">📆</div>
+          <div>
+            <span class="role-badge rb-prog">Programador</span>
+            <h3>Coordinación de equipos</h3>
+            <p>Asigna técnicos a órdenes, gestiona la carga de trabajo del equipo y supervisa el avance de las operaciones activas.</p>
+            <div class="role-perms">
+              <span class="perm-tag">Mi panel</span><span class="perm-tag">Asignaciones</span><span class="perm-tag">Equipo</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- API -->
+  <section id="api" class="api-section">
+    <div class="container">
+      <div class="api-grid">
+        <div>
+          <div class="section-tag">🔌 Integración</div>
+          <h2 class="section-title">API REST lista para conectar con cualquier sistema</h2>
+          <p class="section-desc">FixOps no es un silo. Expone una API segura y documentada que permite integrarlo con tu ERP, CRM, sistema de activos o cualquier plataforma interna.</p>
+          <div class="api-features">
+            <div class="api-feature reveal">
+              <div class="api-check">🔒</div>
+              <div>
+                <h4>Autenticación JWT segura</h4>
+                <p>Todos los endpoints están protegidos con JSON Web Tokens. Control de acceso por rol en cada operación.</p>
+              </div>
+            </div>
+            <div class="api-feature reveal">
+              <div class="api-check">📘</div>
+              <div>
+                <h4>Swagger / OpenAPI incluido</h4>
+                <p>Documentación interactiva generada automáticamente. Prueba cualquier endpoint desde el navegador sin escribir una línea de código.</p>
+              </div>
+            </div>
+            <div class="api-feature reveal">
+              <div class="api-check">⚡</div>
+              <div>
+                <h4>Integración con ERP, SAP y más</h4>
+                <p>Consume o alimenta tus sistemas existentes. La API soporta operaciones CRUD completas sobre órdenes, usuarios, materiales y dependencias.</p>
+              </div>
+            </div>
+            <div class="api-feature reveal">
+              <div class="api-check">📊</div>
+              <div>
+                <h4>Endpoints de analítica</h4>
+                <p>Exporta métricas, KPIs y tendencias directamente para alimentar tus dashboards de BI o herramientas de reporting externas.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="reveal">
+          <div class="api-card">
+            <div class="api-card-header">
+              <span>🌐 FixOps REST API — v1</span>
+            </div>
+            <div class="api-endpoints">
+              <div class="endpoint"><span class="api-pill m-post">POST</span><span class="path">/api/auth/login</span></div>
+              <div class="endpoint"><span class="api-pill m-get">GET</span><span class="path">/api/v1/ordenes</span></div>
+              <div class="endpoint"><span class="api-pill m-post">POST</span><span class="path">/api/v1/ordenes</span></div>
+              <div class="endpoint"><span class="api-pill m-put">PUT</span><span class="path">/api/v1/ordenes/{id}/estado</span></div>
+              <div class="endpoint"><span class="api-pill m-get">GET</span><span class="path">/api/v1/usuarios</span></div>
+              <div class="endpoint"><span class="api-pill m-post">POST</span><span class="path">/api/v1/tecnicos/bulk</span></div>
+              <div class="endpoint"><span class="api-pill m-get">GET</span><span class="path">/api/v1/materiales</span></div>
+              <div class="endpoint"><span class="api-pill m-get">GET</span><span class="path">/api/v1/metricas</span></div>
+              <div class="endpoint"><span class="api-pill m-get">GET</span><span class="path">/api/v1/encuestas/resultados</span></div>
+              <div class="endpoint"><span class="api-pill m-post">POST</span><span class="path">/api/v1/dependencias/bulk</span></div>
+            </div>
+            <a href="http://localhost:5284/swagger" target="_blank" class="swagger-btn">
+              <span class="swagger-icon">📖</span>
+              Explorar documentación completa en Swagger →
+            </a>
+          </div>
+          <p style="text-align:center;font-size:0.75rem;color:var(--text-muted);margin-top:12px;">
+            Desarrollado con .NET 9 · ASP.NET Core · EF Core 9 · SQL Server
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FINAL CTA -->
+  <section class="cta-section">
+    <div class="container">
+      <div class="cta-glow">
+        <div class="section-tag" style="margin-bottom:20px;">🚀 Empieza hoy</div>
+        <h2>¿Listo para dejar atrás<br/><span class="gradient-text">el desorden?</span></h2>
+        <p>FixOps está listo para funcionar. Entra, crea tu primera orden de trabajo<br/>y experimenta lo que es el mantenimiento bien gestionado.</p>
+        <div class="cta-buttons">
+          <a href="/login" class="btn-primary" style="font-size:1.1rem;padding:16px 40px;">🚀 Entrar a FixOps</a>
+          <a href="http://localhost:5284/swagger" target="_blank" class="btn-secondary" style="font-size:1.1rem;padding:16px 40px;">📄 Ver la API</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FOOTER -->
+  <footer>
+    <div class="container inner">
+      <img src="fixops-logo.png" alt="FixOps" />
+      <div class="footer-links">
+        <a href="http://localhost:5284/swagger" target="_blank">API Docs</a>
+        <a href="/login">Iniciar sesión</a>
+      </div>
+      <div style="font-size:0.8rem;color:var(--text-muted);">
+        Construido con .NET 9 + Blazor WASM
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    // Scroll reveal
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(e => {
+        if (e.isIntersecting) { e.target.classList.add('visible'); }
+      });
+    }, { threshold: 0.12 });
+
+    document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+
+    // Sticky nav opacity
+    window.addEventListener('scroll', () => {
+      const nav = document.querySelector('nav');
+      if (window.scrollY > 50) {
+        nav.style.background = 'rgba(7,11,20,0.95)';
+      } else {
+        nav.style.background = 'rgba(7,11,20,0.7)';
+      }
+    });
+  </script>
+</body>
+</html>

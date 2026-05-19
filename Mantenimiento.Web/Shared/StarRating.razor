@@ -1,0 +1,34 @@
+@namespace Mantenimiento.Web.Shared
+
+<div class="star-rating d-flex gap-2">
+    @for (int i = 1; i <= 5; i++)
+    {
+        var starIndex = i;
+        <span class="bi @(i <= Value ? "bi-star-fill star-filled scale-hover" : "bi-star star-empty")" 
+              style="cursor: pointer; font-size: 1.75rem; transition: transform 0.2s ease, color 0.2s ease;"
+              @onclick="() => SetValue(starIndex)"></span>
+    }
+</div>
+
+<style>
+    .star-filled {
+        color: #ffc107; /* Bright yellow/gold */
+    }
+    .star-empty {
+        color: #6c757d; /* Muted gray */
+    }
+    .scale-hover:hover {
+        transform: scale(1.2);
+    }
+</style>
+
+@code {
+    [Parameter] public int Value { get; set; }
+    [Parameter] public EventCallback<int> ValueChanged { get; set; }
+
+    private async Task SetValue(int newValue)
+    {
+        Value = newValue;
+        await ValueChanged.InvokeAsync(Value);
+    }
+}

@@ -1,0 +1,946 @@
+@page "/maestros"
+@using Mantenimiento.Application.DTOs
+@using Mantenimiento.Web.Services
+@inject DependenciaClient DependenciaClient
+@inject MaterialClient MaterialClient
+@inject UsuarioClient UsuarioClient
+@attribute [Authorize(Roles = "Administrador")]
+
+<PageTitle>Módulos Maestros</PageTitle>
+
+<!-- ===== ESTILOS MODALES ===== -->
+<style>
+    .modal-overlay {
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background: rgba(0,0,0,0.5); z-index: 1050;
+        display: flex; align-items: center; justify-content: center;
+    }
+    .modal-box {
+        background: white; border-radius: 8px; padding: 24px;
+        min-width: 420px; max-width: 600px; width: 90%; box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+    }
+    .modal-confirm { max-width: 420px; }
+</style>
+
+<div class="container mt-4">
+    <h1>Administración de Catálogos</h1>
+
+    <ul class="nav nav-tabs mt-4">
+        <li class="nav-item"><button class="nav-link @(_tab=="dep"?"active":"")" type="button" @onclick='()=>_tab="dep"'>Dependencias</button></li>
+        <li class="nav-item"><button class="nav-link @(_tab=="mat"?"active":"")" type="button" @onclick='()=>_tab="mat"'>Materiales</button></li>
+        <li class="nav-item"><button class="nav-link @(_tab=="roles"?"active":"")" type="button" @onclick='()=>{_tab="roles";_nuevoUsuario=null;}'>Roles</button></li>
+    </ul>
+
+    <div class="border-start border-end border-bottom p-4">
+
+        <!-- ===== DEPENDENCIAS ===== -->
+        <div style="display:@(_tab=="dep"?"block":"none")">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h4>Dependencias</h4>
+                <div class="d-flex gap-2">
+                    <InputFile id="depExcelInput" OnChange="HandleDepExcelSelected" accept=".xlsx" style="display:none" />
+                    <button class="btn btn-outline-secondary btn-sm" @onclick="DescargarPlantillaDep">
+                        <i class="bi bi-download me-1"></i>Plantilla
+                    </button>
+                    <button class="btn btn-outline-success btn-sm" @onclick="AbrirSelectorDepExcel">
+                        <i class="bi bi-file-earmark-excel me-1"></i>Carga Masiva
+                    </button>
+                    <button class="btn btn-primary btn-sm" @onclick='()=>_nuevaDep=new()'>+ Nueva Dependencia</button>
+                </div>
+            </div>
+
+            <!-- Preview Excel Dependencias -->
+            @if (_depExcelPreview != null)
+            {
+                <div class="card border-success mb-3">
+                    <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+                        <span><i class="bi bi-table me-2"></i>Vista previa — @_depExcelPreview.Count fila(s) detectadas</span>
+                        <button class="btn btn-sm btn-outline-light" @onclick="()=>_depExcelPreview=null">✕ Cerrar</button>
+                    </div>
+                    <div class="card-body p-0" style="max-height:380px;overflow-y:auto;">
+                        <table class="table table-sm table-hover mb-0">
+                            <thead class="table-light sticky-top">
+                                <tr>
+                                    <th style="width:50px">#</th>
+                                    <th>Nombre</th>
+                                    <th>Código</th>
+                                    <th>Regional</th>
+                                    <th>Departamento</th>
+                                    <th>Ubicación</th>
+                                    <th>Contacto</th>
+                                    <th>Correo</th>
+                                    <th style="width:45px">OK</th>
+                                    <th>Error</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var r in _depExcelPreview)
+                                {
+                                    <tr class="@(r.EsValido ? "" : "table-danger")">
+                                        <td>@r.Fila</td>
+                                        <td>@r.Nombre</td>
+                                        <td>@r.Codigo</td>
+                                        <td>@r.Regional</td>
+                                        <td>@r.Departamento</td>
+                                        <td>@r.Ubicacion</td>
+                                        <td>@r.NombreContacto</td>
+                                        <td>@r.JefeEmail</td>
+                                        <td class="text-center fs-5">
+                                            @if (r.EsValido) { <span class="text-success">✓</span> }
+                                            else             { <span class="text-danger">✗</span> }
+                                        </td>
+                                        <td class="text-danger small">@r.Error</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="card-footer d-flex justify-content-between align-items-center">
+                        <span class="text-muted small">
+                            <span class="text-success fw-bold">@_depExcelPreview.Count(r=>r.EsValido) válidas</span>
+                            &nbsp;·&nbsp;
+                            <span class="text-danger fw-bold">@_depExcelPreview.Count(r=>!r.EsValido) con error</span>
+                        </span>
+                        <button class="btn btn-success btn-sm" @onclick="ConfirmCargarDepExcel"
+                                disabled="@(!_depExcelPreview.Any(r=>r.EsValido))">
+                            <i class="bi bi-cloud-upload me-1"></i>Cargar dependencias válidas
+                        </button>
+                    </div>
+                </div>
+            }
+            @if (_loadingDepExcel) { <div class="alert alert-info py-2"><span class="spinner-border spinner-border-sm me-2"></span>Procesando archivo…</div> }
+
+            @if (_nuevaDep != null)
+            {
+                <div class="card mb-3 border-primary">
+                    <div class="card-body">
+                        <div class="row g-2">
+                            <div class="col-md-4"><input class="form-control" placeholder="Nombre*" @bind="_nuevaDep.Nombre" /></div>
+                            <div class="col-md-2"><input class="form-control" placeholder="Código*" @bind="_nuevaDep.Codigo" /></div>
+                            <div class="col-md-2"><input class="form-control" placeholder="Regional" @bind="_nuevaDep.Regional" /></div>
+                            <div class="col-md-2"><input class="form-control" placeholder="Departamento" @bind="_nuevaDep.Departamento" /></div>
+                            <div class="col-md-2"><input class="form-control" placeholder="Ubicación" @bind="_nuevaDep.Ubicacion" /></div>
+                            <div class="col-md-4"><input class="form-control" placeholder="Nombre Contacto" @bind="_nuevaDep.NombreContacto" /></div>
+                            <div class="col-md-4"><input class="form-control" placeholder="Correo Dependencia" @bind="_nuevaDep.JefeEmail" /></div>
+                        </div>
+                        <div class="mt-2">
+                            <button class="btn btn-success btn-sm" @onclick="CrearDependencia">Guardar</button>
+                            <button class="btn btn-outline-secondary btn-sm ms-2" @onclick='()=>_nuevaDep=null'>Cancelar</button>
+                        </div>
+                        @if (!string.IsNullOrEmpty(_msgDep)) { <div class="alert alert-@_tipoDep mt-2 py-1">@_msgDep</div> }
+                    </div>
+                </div>
+            }
+
+            @if (_dependencias == null) { <p>Cargando...</p> }
+            else
+            {
+                <table class="table table-hover align-middle">
+                    <thead class="table-dark"><tr><th>Código</th><th>Nombre</th><th>Regional</th><th>Departamento</th><th>Ubicación</th><th>Contacto</th><th>Correo Dependencia</th><th></th></tr></thead>
+                    <tbody>
+                        @foreach (var d in _dependencias)
+                        {
+                            <tr>
+                                <td>@d.Codigo</td><td>@d.Nombre</td><td>@d.Regional</td>
+                                <td>@d.Departamento</td><td>@d.Ubicacion</td>
+                                <td>@(string.IsNullOrEmpty(d.NombreContacto) ? "—" : d.NombreContacto)</td>
+                                <td>@(string.IsNullOrEmpty(d.JefeEmail) ? "—" : d.JefeEmail)</td>
+                                <td class="text-end text-nowrap">
+                                    <button class="btn btn-sm btn-outline-primary me-1" title="Editar" @onclick="()=>AbrirEditarDep(d)"><i class="bi bi-pencil"></i></button>
+                                    <button class="btn btn-sm btn-outline-danger" title="Eliminar" @onclick="()=>PedirConfirmDep(d)"><i class="bi bi-trash"></i></button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+                @if (!string.IsNullOrEmpty(_msgDep)) { <div class="alert alert-@_tipoDep py-1">@_msgDep</div> }
+            }
+        </div>
+
+        <!-- ===== MATERIALES ===== -->
+        <div style="display:@(_tab=="mat"?"block":"none")">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h4>Materiales</h4>
+                <div class="d-flex gap-2">
+                    <InputFile id="excelInput" OnChange="HandleExcelSelected" accept=".xlsx" style="display:none" />
+                    <button class="btn btn-outline-success btn-sm" @onclick="AbrirSelectorExcel">
+                        <i class="bi bi-file-earmark-excel me-1"></i>Carga Masiva
+                    </button>
+                    <button class="btn btn-primary btn-sm" @onclick='()=>_nuevoMat=new()'>+ Nuevo Material</button>
+                </div>
+            </div>
+
+            <!-- Preview Excel -->
+            @if (_excelPreview != null)
+            {
+                <div class="card border-success mb-3">
+                    <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+                        <span><i class="bi bi-table me-2"></i>Vista previa — @_excelPreview.Count fila(s) detectadas</span>
+                        <button class="btn btn-sm btn-outline-light" @onclick="()=>_excelPreview=null">✕ Cerrar</button>
+                    </div>
+                    <div class="card-body p-0" style="max-height:380px;overflow-y:auto;">
+                        <table class="table table-sm table-hover mb-0">
+                            <thead class="table-light sticky-top">
+                                <tr>
+                                    <th style="width:50px">#</th>
+                                    <th>Nombre</th>
+                                    <th>Tipo</th>
+                                    <th>Descripción</th>
+                                    <th>Stock</th>
+                                    <th>Precio</th>
+                                    <th style="width:45px">OK</th>
+                                    <th>Error</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var r in _excelPreview)
+                                {
+                                    <tr class="@(r.EsValido ? "" : "table-danger")">
+                                        <td>@r.Fila</td>
+                                        <td>@r.Nombre</td>
+                                        <td>@r.TipoMaterial</td>
+                                        <td class="text-truncate" style="max-width:180px">@r.Descripcion</td>
+                                        <td>@r.StockActual</td>
+                                        <td>@r.PrecioUnitario.ToString("N2")</td>
+                                        <td class="text-center fs-5">
+                                            @if (r.EsValido) { <span class="text-success">✓</span> }
+                                            else             { <span class="text-danger">✗</span> }
+                                        </td>
+                                        <td class="text-danger small">@r.Error</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="card-footer d-flex justify-content-between align-items-center">
+                        <span class="text-muted small">
+                            <span class="text-success fw-bold">@_excelPreview.Count(r=>r.EsValido) válidas</span>
+                            &nbsp;·&nbsp;
+                            <span class="text-danger fw-bold">@_excelPreview.Count(r=>!r.EsValido) con error</span>
+                        </span>
+                        <button class="btn btn-success btn-sm" @onclick="ConfirmCargarExcel"
+                                disabled="@(!_excelPreview.Any(r=>r.EsValido))">
+                            <i class="bi bi-cloud-upload me-1"></i>Cargar materiales válidos
+                        </button>
+                    </div>
+                </div>
+            }
+            @if (_loadingExcel) { <div class="alert alert-info py-2"><span class="spinner-border spinner-border-sm me-2"></span>Procesando archivo…</div> }
+
+            @if (_nuevoMat != null)
+            {
+                <div class="card mb-3 border-primary">
+                    <div class="card-body">
+                        <div class="row g-2">
+                            <div class="col-md-3"><input class="form-control" placeholder="Nombre*" @bind="_nuevoMat.Nombre" /></div>
+                            <div class="col-md-3"><input class="form-control" placeholder="Tipo*" @bind="_nuevoMat.TipoMaterial" /></div>
+                            <div class="col-md-3"><input class="form-control" placeholder="Descripción" @bind="_nuevoMat.Descripcion" /></div>
+                            <div class="col-md-1"><input type="number" class="form-control" placeholder="Stock" @bind="_nuevoMat.StockActual" min="0" /></div>
+                            <div class="col-md-2"><input type="number" step="0.01" class="form-control" placeholder="Precio" @bind="_nuevoMat.PrecioUnitario" min="0" /></div>
+                        </div>
+                        <div class="mt-2">
+                            <button class="btn btn-success btn-sm" @onclick="CrearMaterial">Guardar</button>
+                            <button class="btn btn-outline-secondary btn-sm ms-2" @onclick='()=>_nuevoMat=null'>Cancelar</button>
+                        </div>
+                        @if (!string.IsNullOrEmpty(_msgMat)) { <div class="alert alert-@_tipoMat mt-2 py-1">@_msgMat</div> }
+                    </div>
+                </div>
+            }
+
+            @if (_materiales == null) { <p>Cargando...</p> }
+            else
+            {
+                <table class="table table-hover align-middle">
+                    <thead class="table-dark"><tr><th>Nombre</th><th>Tipo</th><th>Descripción</th><th>Stock</th><th>Precio</th><th></th></tr></thead>
+                    <tbody>
+                        @foreach (var m in _materiales)
+                        {
+                            <tr>
+                                <td>@m.Nombre</td><td>@m.TipoMaterial</td><td>@m.Descripcion</td>
+                                <td>@m.StockActual</td><td>@m.PrecioUnitario.ToString("N2")</td>
+                                <td class="text-end text-nowrap">
+                                    <button class="btn btn-sm btn-outline-primary me-1" title="Editar" @onclick="()=>AbrirEditarMat(m)"><i class="bi bi-pencil"></i></button>
+                                    <button class="btn btn-sm btn-outline-danger" title="Eliminar" @onclick="()=>PedirConfirmMat(m)"><i class="bi bi-trash"></i></button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+                @if (!string.IsNullOrEmpty(_msgMat)) { <div class="alert alert-@_tipoMat py-1">@_msgMat</div> }
+            }
+        </div>
+
+        <!-- ===== ROLES ===== -->
+        <div style="display:@(_tab=="roles"?"block":"none")">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <div class="d-flex align-items-center gap-3">
+                    <h4 class="mb-0">Gestión de Usuarios</h4>
+                    <select class="form-select form-select-sm" style="width:auto"
+                            @bind="_rolFiltro" @bind:after="OnRolFiltroChanged">
+                        <option value="Tecnico">Técnicos</option>
+                        <option value="Programador">Programadores</option>
+                        <option value="Administrador">Administradores</option>
+                    </select>
+                </div>
+                <div class="d-flex gap-2">
+                    @if (_rolFiltro == "Tecnico" || _rolFiltro == "Programador")
+                    {
+                        <InputFile id="usuarioExcelInput" OnChange="HandleUsuarioExcelSelected" accept=".xlsx" style="display:none" />
+                        <button class="btn btn-outline-secondary btn-sm" @onclick="()=>DescargarPlantillaUsuario()">
+                            <i class="bi bi-download me-1"></i>Plantilla
+                        </button>
+                        <button class="btn btn-outline-success btn-sm" @onclick="AbrirSelectorUsuarioExcel">
+                            <i class="bi bi-file-earmark-excel me-1"></i>Carga Masiva
+                        </button>
+                    }
+                    <button class="btn btn-primary btn-sm"
+                            @onclick='()=>{ _nuevoUsuario = new UsuarioDto { Rol = _rolFiltro }; _msgUsuario=null; }'>
+                        + Nuevo @NombreRol(_rolFiltro)
+                    </button>
+                </div>
+            </div>
+
+            <!-- Preview Excel Usuarios -->
+            @if (_usuarioExcelPreview != null)
+            {
+                <div class="card border-success mb-3">
+                    <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+                        <span><i class="bi bi-table me-2"></i>Vista previa — @_usuarioExcelPreview.Count fila(s) detectadas</span>
+                        <button class="btn btn-sm btn-outline-light" @onclick="()=>_usuarioExcelPreview=null">✕ Cerrar</button>
+                    </div>
+                    <div class="card-body p-0" style="max-height:380px;overflow-y:auto;">
+                        <table class="table table-sm table-hover mb-0">
+                            <thead class="table-light sticky-top">
+                                <tr>
+                                    <th style="width:50px">#</th>
+                                    <th>Nombre</th>
+                                    <th>Email</th>
+                                    <th>Dependencia</th>
+                                    @if (_rolFiltro == "Tecnico") { <th>Programador</th> }
+                                    <th style="width:45px">OK</th>
+                                    <th>Error</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var r in _usuarioExcelPreview)
+                                {
+                                    <tr class="@(r.EsValido ? "" : "table-danger")">
+                                        <td>@r.Fila</td>
+                                        <td>@r.Nombre</td>
+                                        <td>@r.Email</td>
+                                        <td>@(string.IsNullOrEmpty(r.CodigoDependencia) ? "—" : r.CodigoDependencia)</td>
+                                        @if (_rolFiltro == "Tecnico") { <td>@(string.IsNullOrEmpty(r.EmailProgramador) ? "—" : r.EmailProgramador)</td> }
+                                        <td class="text-center fs-5">
+                                            @if (r.EsValido) { <span class="text-success">✓</span> }
+                                            else             { <span class="text-danger">✗</span> }
+                                        </td>
+                                        <td class="text-danger small">@r.Error</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="card-footer d-flex justify-content-between align-items-center">
+                        <span class="text-muted small">
+                            <span class="text-success fw-bold">@_usuarioExcelPreview.Count(r=>r.EsValido) válidos</span>
+                            &nbsp;·&nbsp;
+                            <span class="text-danger fw-bold">@_usuarioExcelPreview.Count(r=>!r.EsValido) con error</span>
+                        </span>
+                        <button class="btn btn-success btn-sm" @onclick="ConfirmCargarUsuarioExcel"
+                                disabled="@(!_usuarioExcelPreview.Any(r=>r.EsValido))">
+                            <i class="bi bi-cloud-upload me-1"></i>Cargar @NombreRol(_rolFiltro)s válidos
+                        </button>
+                    </div>
+                </div>
+            }
+            @if (_loadingUsuarioExcel) { <div class="alert alert-info py-2"><span class="spinner-border spinner-border-sm me-2"></span>Procesando archivo…</div> }
+
+            @if (_nuevoUsuario != null)
+            {
+                <div class="card mb-3 border-primary">
+                    <div class="card-header bg-primary text-white py-2">
+                        <strong>Nuevo @NombreRol(_nuevoUsuario.Rol)</strong>
+                    </div>
+                    <div class="card-body">
+                        <div class="row g-2">
+                            <div class="col-md-4">
+                                <input class="form-control" placeholder="Nombre*" @bind="_nuevoUsuario.Nombre" />
+                            </div>
+                            <div class="col-md-4">
+                                <input class="form-control" placeholder="Email*" @bind="_nuevoUsuario.Email" />
+                            </div>
+                            <div class="col-md-4">
+                                <select class="form-select" @bind="_nuevoUsuario.DependenciaId">
+                                    <option value="">-- Dependencia --</option>
+                                    @foreach (var d in _dependencias ?? [])
+                                    { <option value="@d.Id">@d.Nombre</option> }
+                                </select>
+                            </div>
+                            @if (_nuevoUsuario.Rol == "Tecnico")
+                            {
+                                <div class="col-md-4">
+                                    <select class="form-select" @bind="_nuevoUsuario.ProgramadorId">
+                                        <option value="">— Sin programador asignado —</option>
+                                        @foreach (var p in _programadores ?? [])
+                                        { <option value="@p.Id">@p.Nombre</option> }
+                                    </select>
+                                </div>
+                            }
+                        </div>
+                        <small class="text-muted mt-1 d-block">Contraseña temporal: Admin123!</small>
+                        <div class="mt-2">
+                            <button class="btn btn-success btn-sm" @onclick="CrearUsuario">Guardar</button>
+                            <button class="btn btn-outline-secondary btn-sm ms-2" @onclick='()=>_nuevoUsuario=null'>Cancelar</button>
+                        </div>
+                        @if (!string.IsNullOrEmpty(_msgUsuario))
+                        { <div class="alert alert-@_tipoUsuario mt-2 py-1">@_msgUsuario</div> }
+                    </div>
+                </div>
+            }
+
+            @if (_usuariosFiltrados == null) { <p>Cargando...</p> }
+            else if (!_usuariosFiltrados.Any())
+            {
+                <div class="alert alert-info py-2">No hay @NombreRol(_rolFiltro)s registrados.</div>
+            }
+            else
+            {
+                <table class="table table-hover align-middle">
+                    <thead class="table-dark">
+                        <tr>
+                            <th>Nombre</th>
+                            <th>Email</th>
+                            <th>Dependencia</th>
+                            @if (_rolFiltro == "Tecnico")
+                            { <th>Programador asignado</th> }
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var u in _usuariosFiltrados)
+                        {
+                            <tr>
+                                <td>@u.Nombre</td>
+                                <td>@u.Email</td>
+                                <td>@(string.IsNullOrEmpty(u.DependenciaNombre) ? "—" : u.DependenciaNombre)</td>
+                                @if (_rolFiltro == "Tecnico")
+                                {
+                                    <td>
+                                        <select class="form-select form-select-sm"
+                                                value="@(u.ProgramadorId?.ToString() ?? "")"
+                                                @onchange="async e => await AsignarProgramador(u, e.Value?.ToString())">
+                                            <option value="">— Sin programador —</option>
+                                            @foreach (var p in _programadores ?? [])
+                                            { <option value="@p.Id">@p.Nombre</option> }
+                                        </select>
+                                    </td>
+                                }
+                                <td class="text-end text-nowrap">
+                                    <button class="btn btn-sm btn-outline-primary me-1" title="Editar"
+                                            @onclick="()=>AbrirEditarUsuario(u)">
+                                        <i class="bi bi-pencil"></i>
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-danger" title="Eliminar"
+                                            @onclick="()=>PedirConfirmUsuario(u)">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+                @if (!string.IsNullOrEmpty(_msgUsuario))
+                { <div class="alert alert-@_tipoUsuario py-1">@_msgUsuario</div> }
+            }
+        </div>
+    </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- MODAL EDITAR DEPENDENCIA -->
+<!-- ============================================================ -->
+@if (_editDep != null)
+{
+    <div class="modal-overlay">
+        <div class="modal-box">
+            <h5 class="mb-3"><i class="bi bi-pencil-square me-2"></i>Editar Dependencia</h5>
+            <div class="row g-2 mb-3">
+                <div class="col-6"><label class="form-label">Nombre*</label><input class="form-control" @bind="_editDep.Nombre" /></div>
+                <div class="col-6"><label class="form-label">Código*</label><input class="form-control" @bind="_editDep.Codigo" /></div>
+                <div class="col-6"><label class="form-label">Regional</label><input class="form-control" @bind="_editDep.Regional" /></div>
+                <div class="col-6"><label class="form-label">Departamento</label><input class="form-control" @bind="_editDep.Departamento" /></div>
+                <div class="col-6"><label class="form-label">Ubicación</label><input class="form-control" @bind="_editDep.Ubicacion" /></div>
+                <div class="col-6"><label class="form-label">Nombre Contacto</label><input class="form-control" @bind="_editDep.NombreContacto" /></div>
+                <div class="col-6"><label class="form-label">Correo Dependencia</label><input class="form-control" @bind="_editDep.JefeEmail" /></div>
+            </div>
+            <div class="d-flex justify-content-end gap-2">
+                <button class="btn btn-outline-secondary" @onclick='()=>_editDep=null'>Cancelar</button>
+                <button class="btn btn-success" @onclick="ConfirmGuardarDep">Guardar cambios</button>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- ============================================================ -->
+<!-- MODAL EDITAR MATERIAL -->
+<!-- ============================================================ -->
+@if (_editMat != null)
+{
+    <div class="modal-overlay">
+        <div class="modal-box">
+            <h5 class="mb-3"><i class="bi bi-pencil-square me-2"></i>Editar Material</h5>
+            <div class="row g-2 mb-3">
+                <div class="col-6"><label class="form-label">Nombre*</label><input class="form-control" @bind="_editMat.Nombre" /></div>
+                <div class="col-6"><label class="form-label">Tipo*</label><input class="form-control" @bind="_editMat.TipoMaterial" /></div>
+                <div class="col-12"><label class="form-label">Descripción</label><input class="form-control" @bind="_editMat.Descripcion" /></div>
+                <div class="col-6"><label class="form-label">Stock</label><input type="number" class="form-control" @bind="_editMat.StockActual" min="0" /></div>
+                <div class="col-6"><label class="form-label">Precio Unitario</label><input type="number" step="0.01" class="form-control" @bind="_editMat.PrecioUnitario" min="0" /></div>
+            </div>
+            <div class="d-flex justify-content-end gap-2">
+                <button class="btn btn-outline-secondary" @onclick='()=>_editMat=null'>Cancelar</button>
+                <button class="btn btn-success" @onclick="ConfirmGuardarMat">Guardar cambios</button>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- ============================================================ -->
+<!-- MODAL EDITAR USUARIO (Técnico / Programador / Administrador) -->
+<!-- ============================================================ -->
+@if (_editUsuario != null)
+{
+    <div class="modal-overlay">
+        <div class="modal-box">
+            <h5 class="mb-3"><i class="bi bi-pencil-square me-2"></i>Editar @NombreRol(_editUsuario.Rol)</h5>
+            <div class="row g-2 mb-3">
+                <div class="col-6">
+                    <label class="form-label">Nombre*</label>
+                    <input class="form-control" @bind="_editUsuario.Nombre" />
+                </div>
+                <div class="col-6">
+                    <label class="form-label">Email*</label>
+                    <input class="form-control" @bind="_editUsuario.Email" />
+                </div>
+                <div class="col-6">
+                    <label class="form-label">Rol</label>
+                    <select class="form-select" @bind="_editUsuario.Rol">
+                        <option value="Tecnico">Técnico</option>
+                        <option value="Programador">Programador</option>
+                        <option value="Administrador">Administrador</option>
+                    </select>
+                </div>
+                <div class="col-6">
+                    <label class="form-label">Dependencia</label>
+                    <select class="form-select" @bind="_editUsuario.DependenciaId">
+                        <option value="">-- Sin dependencia --</option>
+                        @foreach (var d in _dependencias ?? [])
+                        { <option value="@d.Id">@d.Nombre</option> }
+                    </select>
+                </div>
+                @if (_editUsuario.Rol == "Tecnico")
+                {
+                    <div class="col-12">
+                        <label class="form-label">Programador asignado</label>
+                        <select class="form-select" @bind="_editUsuario.ProgramadorId">
+                            <option value="">— Sin programador —</option>
+                            @foreach (var p in _programadores ?? [])
+                            { <option value="@p.Id">@p.Nombre</option> }
+                        </select>
+                    </div>
+                }
+            </div>
+            <div class="d-flex justify-content-end gap-2">
+                <button class="btn btn-outline-secondary" @onclick='()=>_editUsuario=null'>Cancelar</button>
+                <button class="btn btn-success" @onclick="ConfirmGuardarUsuario">Guardar cambios</button>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- ============================================================ -->
+<!-- MODAL CONFIRMACIÓN (eliminar / guardar) -->
+<!-- ============================================================ -->
+@if (_confirm)
+{
+    <div class="modal-overlay">
+        <div class="modal-box modal-confirm">
+            <h5 class="mb-3"><i class="bi bi-question-circle text-warning me-2"></i>Confirmar acción</h5>
+            <p class="mb-4">@_confirmMsg</p>
+            <div class="d-flex justify-content-end gap-2">
+                <button class="btn btn-outline-secondary" @onclick="CancelarConfirm">No, cancelar</button>
+                <button class="btn btn-danger" @onclick="EjecutarConfirm">Sí, continuar</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private string _tab = "dep";
+
+    // ── Datos maestros ────────────────────────────────────────────
+    private IEnumerable<DependenciaDto>? _dependencias;
+    private IEnumerable<MaterialDto>?    _materiales;
+    private IEnumerable<UsuarioDto>?     _programadores;
+    private IEnumerable<UsuarioDto>?     _todosUsuarios;
+
+    // ── Tab Roles ─────────────────────────────────────────────────
+    private string                       _rolFiltro        = "Tecnico";
+    private IEnumerable<UsuarioDto>?     _usuariosFiltrados;
+    private UsuarioDto?                  _nuevoUsuario;
+    private UsuarioDto?                  _editUsuario;
+    private string? _msgUsuario; private string _tipoUsuario = "success";
+
+    // ── Dependencias ──────────────────────────────────────────────
+    private DependenciaDto? _nuevaDep;
+    private DependenciaDto? _editDep;
+    private string? _msgDep; private string _tipoDep = "success";
+
+    // ── Materiales ────────────────────────────────────────────────
+    private MaterialDto? _nuevoMat;
+    private MaterialDto? _editMat;
+    private string? _msgMat; private string _tipoMat = "success";
+
+    // ── Confirmación genérica ─────────────────────────────────────
+    private bool _confirm;
+    private string _confirmMsg = string.Empty;
+    private Func<Task>? _pendingAction;
+
+    // ── Excel Dependencias ────────────────────────────────────────
+    private List<DependenciaPreviewRow>? _depExcelPreview;
+    private bool _loadingDepExcel;
+
+    // ── Excel Materiales ──────────────────────────────────────────
+    private List<MaterialPreviewRow>? _excelPreview;
+    private bool _loadingExcel;
+
+    // ── Excel Usuarios ────────────────────────────────────────────
+    private List<UsuarioPreviewRow>? _usuarioExcelPreview;
+    private bool _loadingUsuarioExcel;
+
+    [Inject] private IJSRuntime JS { get; set; } = default!;
+
+    // =============================================================
+    protected override async Task OnInitializedAsync() => await CargarTodo();
+
+    private async Task CargarTodo()
+    {
+        _dependencias  = await DependenciaClient.GetAllAsync();
+        _materiales    = await MaterialClient.GetAllAsync();
+        _todosUsuarios = await UsuarioClient.GetAllUsuariosAsync();
+        _programadores = _todosUsuarios.Where(u => u.Rol == "Programador").ToList();
+        _usuariosFiltrados = _todosUsuarios.Where(u => u.Rol == _rolFiltro).ToList();
+    }
+
+    private async Task RecargarUsuarios()
+    {
+        _todosUsuarios     = await UsuarioClient.GetAllUsuariosAsync();
+        _programadores     = _todosUsuarios.Where(u => u.Rol == "Programador").ToList();
+        _usuariosFiltrados = _todosUsuarios.Where(u => u.Rol == _rolFiltro).ToList();
+    }
+
+    private Task OnRolFiltroChanged()
+    {
+        _nuevoUsuario        = null;
+        _msgUsuario          = null;
+        _usuarioExcelPreview = null;
+        _usuariosFiltrados   = _todosUsuarios?.Where(u => u.Rol == _rolFiltro).ToList();
+        return Task.CompletedTask;
+    }
+
+    private static string NombreRol(string rol) => rol switch
+    {
+        "Tecnico"      => "Técnico",
+        "Programador"  => "Programador",
+        "Administrador"=> "Administrador",
+        _              => rol
+    };
+
+    // ── Roles: abrir / crear / guardar / eliminar ─────────────────
+    private void AbrirEditarUsuario(UsuarioDto u) =>
+        _editUsuario = new()
+        {
+            Id = u.Id, Nombre = u.Nombre, Email = u.Email, Rol = u.Rol,
+            DependenciaId = u.DependenciaId, ProgramadorId = u.ProgramadorId
+        };
+
+    private async Task CrearUsuario()
+    {
+        if (string.IsNullOrWhiteSpace(_nuevoUsuario!.Nombre) || string.IsNullOrWhiteSpace(_nuevoUsuario.Email))
+        { _msgUsuario = "Nombre y Email son obligatorios."; _tipoUsuario = "danger"; return; }
+
+        await UsuarioClient.CreateAsync(_nuevoUsuario);
+        var nombre = NombreRol(_nuevoUsuario.Rol);
+        _nuevoUsuario = null;
+        _msgUsuario = $"{nombre} creado. Contraseña temporal: Admin123!"; _tipoUsuario = "success";
+        await RecargarUsuarios();
+    }
+
+    private void ConfirmGuardarUsuario()
+    {
+        _pendingAction = GuardarUsuario;
+        _confirmMsg    = $"¿Guardar los cambios en este usuario?";
+        _confirm       = true;
+    }
+
+    private async Task GuardarUsuario()
+    {
+        await UsuarioClient.UpdateAsync(_editUsuario!);
+        _editUsuario = null;
+        _msgUsuario = "Usuario actualizado."; _tipoUsuario = "success";
+        await RecargarUsuarios();
+    }
+
+    private void PedirConfirmUsuario(UsuarioDto u)
+    {
+        _confirmMsg    = $"¿Eliminar a \"{u.Nombre}\" ({NombreRol(u.Rol)})? Esta acción no se puede deshacer.";
+        _pendingAction = async () =>
+        {
+            await UsuarioClient.DeleteAsync(u.Id);
+            _msgUsuario = "Usuario eliminado."; _tipoUsuario = "success";
+            await RecargarUsuarios();
+        };
+        _confirm = true;
+    }
+
+    private async Task AsignarProgramador(UsuarioDto tecnico, string? progIdStr)
+    {
+        tecnico.ProgramadorId    = string.IsNullOrEmpty(progIdStr) ? null : Guid.Parse(progIdStr);
+        tecnico.ProgramadorNombre = _programadores?.FirstOrDefault(p => p.Id == tecnico.ProgramadorId)?.Nombre ?? string.Empty;
+        await UsuarioClient.UpdateAsync(tecnico);
+        _msgUsuario = $"Programador actualizado para {tecnico.Nombre}."; _tipoUsuario = "success";
+        await RecargarUsuarios();
+    }
+
+    // ── Dependencias ──────────────────────────────────────────────
+    private void AbrirEditarDep(DependenciaDto d) =>
+        _editDep = new() { Id=d.Id, Nombre=d.Nombre, Codigo=d.Codigo, Regional=d.Regional, Departamento=d.Departamento, Ubicacion=d.Ubicacion, JefeEmail=d.JefeEmail, NombreContacto=d.NombreContacto };
+
+    private void PedirConfirmDep(DependenciaDto d)
+    {
+        _confirmMsg    = $"¿Eliminar la dependencia \"{d.Nombre}\"? Esta acción no se puede deshacer.";
+        _pendingAction = async () =>
+        {
+            await DependenciaClient.DeleteAsync(d.Id);
+            _msgDep = "Dependencia eliminada."; _tipoDep = "success";
+            _dependencias = await DependenciaClient.GetAllAsync();
+        };
+        _confirm = true;
+    }
+
+    private void ConfirmGuardarDep() { _pendingAction = GuardarDep; _confirmMsg = "¿Guardar los cambios en esta dependencia?"; _confirm = true; }
+
+    private async Task GuardarDep()
+    {
+        await DependenciaClient.UpdateAsync(_editDep!);
+        _editDep = null;
+        _msgDep = "Dependencia actualizada."; _tipoDep = "success";
+        _dependencias = await DependenciaClient.GetAllAsync();
+    }
+
+    private async Task CrearDependencia()
+    {
+        if (string.IsNullOrWhiteSpace(_nuevaDep!.Nombre) || string.IsNullOrWhiteSpace(_nuevaDep.Codigo))
+        { _msgDep = "Nombre y Código son obligatorios."; _tipoDep = "danger"; return; }
+        await DependenciaClient.CreateAsync(_nuevaDep);
+        _nuevaDep = null; _msgDep = "Dependencia creada."; _tipoDep = "success";
+        _dependencias = await DependenciaClient.GetAllAsync();
+    }
+
+    // ── Materiales ────────────────────────────────────────────────
+    private void AbrirEditarMat(MaterialDto m) =>
+        _editMat = new() { Id=m.Id, Nombre=m.Nombre, TipoMaterial=m.TipoMaterial, Descripcion=m.Descripcion, StockActual=m.StockActual, PrecioUnitario=m.PrecioUnitario };
+
+    private void PedirConfirmMat(MaterialDto m)
+    {
+        _confirmMsg    = $"¿Eliminar el material \"{m.Nombre}\"? Esta acción no se puede deshacer.";
+        _pendingAction = async () =>
+        {
+            var ok = await MaterialClient.DeleteAsync(m.Id);
+            if (ok) { _msgMat = "Material eliminado."; _tipoMat = "success"; _materiales = await MaterialClient.GetAllAsync(); }
+            else    { _msgMat = "No se puede eliminar: el material está en uso."; _tipoMat = "danger"; }
+        };
+        _confirm = true;
+    }
+
+    private void ConfirmGuardarMat() { _pendingAction = GuardarMat; _confirmMsg = "¿Guardar los cambios en este material?"; _confirm = true; }
+
+    private async Task GuardarMat()
+    {
+        await MaterialClient.UpdateAsync(_editMat!);
+        _editMat = null;
+        _msgMat = "Material actualizado."; _tipoMat = "success";
+        _materiales = await MaterialClient.GetAllAsync();
+    }
+
+    private async Task CrearMaterial()
+    {
+        if (string.IsNullOrWhiteSpace(_nuevoMat!.Nombre) || string.IsNullOrWhiteSpace(_nuevoMat.TipoMaterial))
+        { _msgMat = "Nombre y Tipo son obligatorios."; _tipoMat = "danger"; return; }
+        await MaterialClient.CreateAsync(_nuevoMat);
+        _nuevoMat = null; _msgMat = "Material creado."; _tipoMat = "success";
+        _materiales = await MaterialClient.GetAllAsync();
+    }
+
+    // ── Excel Dependencias ────────────────────────────────────────
+    private async Task AbrirSelectorDepExcel() =>
+        await JS.InvokeVoidAsync("eval", "document.getElementById('depExcelInput').click()");
+
+    private async Task HandleDepExcelSelected(InputFileChangeEventArgs e)
+    {
+        _loadingDepExcel = true; _depExcelPreview = null;
+        try
+        {
+            var file = e.File;
+            using var stream = file.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024);
+            _depExcelPreview = await DependenciaClient.PreviewExcelAsync(stream, file.Name);
+        }
+        catch { _msgDep = "Error al leer el archivo. Verifique que sea un .xlsx válido."; _tipoDep = "danger"; }
+        _loadingDepExcel = false;
+    }
+
+    private void ConfirmCargarDepExcel()
+    {
+        var validas   = _depExcelPreview?.Count(r => r.EsValido)  ?? 0;
+        var invalidas = _depExcelPreview?.Count(r => !r.EsValido) ?? 0;
+        _confirmMsg = invalidas > 0
+            ? $"Se cargarán {validas} dependencia(s) válida(s). Las {invalidas} con error serán omitidas. ¿Continuar?"
+            : $"Se cargarán {validas} dependencia(s). ¿Confirmar la carga?";
+        _pendingAction = CargarDepExcel;
+        _confirm = true;
+    }
+
+    private async Task CargarDepExcel()
+    {
+        var validas = _depExcelPreview?
+            .Where(r => r.EsValido)
+            .Select(r => new DependenciaDto
+            {
+                Nombre         = r.Nombre,
+                Codigo         = r.Codigo,
+                Regional       = r.Regional,
+                Departamento   = r.Departamento,
+                Ubicacion      = r.Ubicacion,
+                NombreContacto = r.NombreContacto,
+                JefeEmail      = r.JefeEmail
+            })
+            .ToList() ?? [];
+        var creadas = await DependenciaClient.BulkCreateAsync(validas);
+        _msgDep = $"{creadas} dependencia(s) cargada(s) correctamente."; _tipoDep = "success";
+        _depExcelPreview = null;
+        _dependencias = await DependenciaClient.GetAllAsync();
+    }
+
+    private async Task DescargarPlantillaDep()
+    {
+        var bytes = await DependenciaClient.DescargarPlantillaAsync();
+        if (bytes != null)
+            await JS.InvokeVoidAsync("eval",
+                $"const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([new Uint8Array([{string.Join(",", bytes)}])],{{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}}));a.download='plantilla_dependencias.xlsx';a.click()");
+    }
+
+    // ── Excel Materiales ──────────────────────────────────────────
+    private async Task AbrirSelectorExcel() =>
+        await JS.InvokeVoidAsync("eval", "document.getElementById('excelInput').click()");
+
+    private async Task HandleExcelSelected(InputFileChangeEventArgs e)
+    {
+        _loadingExcel = true; _excelPreview = null;
+        try
+        {
+            var file = e.File;
+            using var stream = file.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024);
+            _excelPreview = await MaterialClient.PreviewExcelAsync(stream, file.Name);
+        }
+        catch { _msgMat = "Error al leer el archivo. Verifique que sea un .xlsx válido."; _tipoMat = "danger"; }
+        _loadingExcel = false;
+    }
+
+    private void ConfirmCargarExcel()
+    {
+        var validas   = _excelPreview?.Count(r => r.EsValido)  ?? 0;
+        var invalidas = _excelPreview?.Count(r => !r.EsValido) ?? 0;
+        _confirmMsg = invalidas > 0
+            ? $"Se cargarán {validas} material(es) válido(s). Los {invalidas} con error serán omitidos. ¿Continuar?"
+            : $"Se cargarán {validas} material(es). ¿Confirmar la carga?";
+        _pendingAction = CargarExcel;
+        _confirm = true;
+    }
+
+    private async Task CargarExcel()
+    {
+        var validas = _excelPreview?
+            .Where(r => r.EsValido)
+            .Select(r => new MaterialDto { Nombre = r.Nombre, TipoMaterial = r.TipoMaterial, Descripcion = r.Descripcion, StockActual = r.StockActual, PrecioUnitario = r.PrecioUnitario })
+            .ToList() ?? [];
+        var creados = await MaterialClient.BulkCreateAsync(validas);
+        _msgMat = $"{creados} material(es) cargado(s) correctamente."; _tipoMat = "success";
+        _excelPreview = null;
+        _materiales = await MaterialClient.GetAllAsync();
+    }
+
+    // ── Excel Usuarios ────────────────────────────────────────────
+    private async Task AbrirSelectorUsuarioExcel() =>
+        await JS.InvokeVoidAsync("eval", "document.getElementById('usuarioExcelInput').click()");
+
+    private async Task HandleUsuarioExcelSelected(InputFileChangeEventArgs e)
+    {
+        _loadingUsuarioExcel = true; _usuarioExcelPreview = null;
+        try
+        {
+            var file = e.File;
+            using var stream = file.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024);
+            _usuarioExcelPreview = await UsuarioClient.PreviewExcelAsync(stream, file.Name, _rolFiltro);
+        }
+        catch { _msgUsuario = "Error al leer el archivo. Verifique que sea un .xlsx válido."; _tipoUsuario = "danger"; }
+        _loadingUsuarioExcel = false;
+    }
+
+    private void ConfirmCargarUsuarioExcel()
+    {
+        var validos   = _usuarioExcelPreview?.Count(r => r.EsValido)  ?? 0;
+        var invalidos = _usuarioExcelPreview?.Count(r => !r.EsValido) ?? 0;
+        _confirmMsg = invalidos > 0
+            ? $"Se cargarán {validos} {NombreRol(_rolFiltro)}(s) válido(s). Los {invalidos} con error serán omitidos. ¿Continuar?"
+            : $"Se cargarán {validos} {NombreRol(_rolFiltro)}(s). ¿Confirmar la carga?";
+        _pendingAction = CargarUsuarioExcel;
+        _confirm = true;
+    }
+
+    private async Task CargarUsuarioExcel()
+    {
+        var validos = _usuarioExcelPreview?
+            .Where(r => r.EsValido)
+            .Select(r => new UsuarioDto
+            {
+                Nombre        = r.Nombre,
+                Email         = r.Email,
+                Rol           = r.Rol,
+                DependenciaId = r.DependenciaId,
+                ProgramadorId = r.ProgramadorId
+            })
+            .ToList() ?? [];
+        var creados = await UsuarioClient.BulkCreateAsync(validos);
+        _msgUsuario = $"{creados} {NombreRol(_rolFiltro)}(s) cargado(s) correctamente. Contraseña temporal: Admin123!";
+        _tipoUsuario = "success";
+        _usuarioExcelPreview = null;
+        await RecargarUsuarios();
+    }
+
+    private async Task DescargarPlantillaUsuario()
+    {
+        var bytes = await UsuarioClient.DescargarPlantillaAsync(_rolFiltro);
+        if (bytes != null)
+            await JS.InvokeVoidAsync("eval",
+                $"const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([new Uint8Array([{string.Join(",", bytes)}])],{{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}}));a.download='plantilla_{_rolFiltro.ToLower()}s.xlsx';a.click()");
+    }
+
+    // ── Confirmación ──────────────────────────────────────────────
+    private void CancelarConfirm() { _confirm = false; _pendingAction = null; }
+
+    private async Task EjecutarConfirm()
+    {
+        _confirm = false;
+        if (_pendingAction != null) await _pendingAction();
+        _pendingAction = null;
+    }
+}

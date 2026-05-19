@@ -1,0 +1,110 @@
+@using Mantenimiento.Application.DTOs
+@using Mantenimiento.Web.Services
+@using Microsoft.AspNetCore.Components.Authorization
+@using System.Security.Claims
+@inject ProgramadorClient ProgramadorClient
+@inject AuthenticationStateProvider AuthStateProvider
+@inject NavigationManager Nav
+@implements IDisposable
+
+<style>
+    .bell-wrapper   { position:relative;display:inline-block; }
+    .bell-badge     { position:absolute;top:-4px;right:-6px;background:#dc3545;color:#fff;border-radius:50%;font-size:10px;width:17px;height:17px;display:flex;align-items:center;justify-content:center;font-weight:700; }
+    .notif-dropdown { position:absolute;right:0;top:36px;width:340px;background:#fff;border:1px solid #dee2e6;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.15);z-index:2000;max-height:420px;overflow-y:auto; }
+    .notif-item     { padding:10px 14px;border-bottom:1px solid #f0f0f0;cursor:pointer; }
+    .notif-item:hover { background:#f8f9fa; }
+    .notif-item.no-leida { background:#fffbea; }
+    .notif-msg      { font-size:.85rem;line-height:1.3; }
+    .notif-fecha    { font-size:.75rem;color:#6c757d; }
+</style>
+
+<div class="bell-wrapper">
+    <button class="btn btn-link text-white p-0 border-0 shadow-none" title="Notificaciones" @onclick="TogglePanel">
+        <i class="bi bi-bell-fill fs-5"></i>
+        @if (_noLeidas > 0)
+        {
+            <span class="bell-badge">@(_noLeidas > 9 ? "9+" : _noLeidas.ToString())</span>
+        }
+    </button>
+
+    @if (_mostrarPanel)
+    {
+        <div class="notif-dropdown">
+            <div class="d-flex justify-content-between align-items-center px-3 py-2 border-bottom">
+                <span class="fw-semibold small">Notificaciones</span>
+                @if (_noLeidas > 0)
+                {
+                    <button class="btn btn-link btn-sm p-0 text-primary" @onclick="MarcarTodas">Marcar todas leídas</button>
+                }
+            </div>
+            @if (!_notificaciones.Any())
+            {
+                <div class="text-center text-muted py-3 small">Sin notificaciones nuevas</div>
+            }
+            else
+            {
+                @foreach (var n in _notificaciones)
+                {
+                    <div class="notif-item @(n.Leida ? "" : "no-leida")" @onclick="() => AbrirNotificacion(n)">
+                        <div class="notif-msg">@n.Mensaje</div>
+                        <div class="notif-fecha">@n.FechaCreacion.ToLocalTime().ToString("dd/MM/yy HH:mm")</div>
+                    </div>
+                }
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private List<NotificacionDto> _notificaciones = [];
+    private int    _noLeidas;
+    private bool   _mostrarPanel;
+    private Timer? _timer;
+    private bool   _esRolConNotificaciones;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = auth.User;
+        _esRolConNotificaciones = user.Identity?.IsAuthenticated == true;
+        if (_esRolConNotificaciones)
+        {
+            await Cargar();
+            // polling cada 30 segundos
+            _timer = new Timer(async _ =>
+            {
+                await Cargar();
+                await InvokeAsync(StateHasChanged);
+            }, null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
+        }
+    }
+
+    private async Task Cargar()
+    {
+        try
+        {
+            _notificaciones = await ProgramadorClient.GetNotificacionesAsync();
+            _noLeidas = _notificaciones.Count(n => !n.Leida);
+        }
+        catch { /* sin conectividad, ignorar */ }
+    }
+
+    private void TogglePanel() => _mostrarPanel = !_mostrarPanel;
+
+    private async Task MarcarTodas()
+    {
+        await ProgramadorClient.MarcarTodasLeidasAsync();
+        await Cargar();
+    }
+
+    private async Task AbrirNotificacion(NotificacionDto n)
+    {
+        if (!n.Leida) await ProgramadorClient.MarcarLeidaAsync(n.Id);
+        _mostrarPanel = false;
+        if (n.OrdenTrabajoId.HasValue)
+            Nav.NavigateTo($"/añadir-operacion/{n.OrdenTrabajoId}");
+        await Cargar();
+    }
+
+    public void Dispose() => _timer?.Dispose();
+}

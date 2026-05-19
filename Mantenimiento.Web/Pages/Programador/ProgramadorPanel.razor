@@ -1,0 +1,788 @@
+@page "/programador"
+@using Mantenimiento.Application.DTOs
+@using Mantenimiento.Domain.Enums
+@using Mantenimiento.Web.Services
+@using Microsoft.AspNetCore.Components.Forms
+@inject ProgramadorClient ProgramadorClient
+@inject MaterialClient MaterialClient
+@inject NavigationManager NavigationManager
+@inject IJSRuntime JS
+@attribute [Authorize(Roles = "Programador")]
+
+<style>
+    .tab-active    { border-bottom: 3px solid #0d6efd; color: #0d6efd; font-weight: 600; }
+    .tab-btn       { background:none; border:none; padding:.5rem 1.25rem; cursor:pointer; color:#6c757d; }
+    .tab-btn:hover { color:#0d6efd; }
+    .expand-row    { background: #f8f9fa; }
+    .modal-overlay { position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.5);z-index:1050;display:flex;align-items:center;justify-content:center; }
+    .modal-box     { background:#fff;border-radius:8px;padding:24px;min-width:440px;max-width:640px;width:92%;box-shadow:0 8px 32px rgba(0,0,0,.3); }
+    .modal-confirm { max-width:420px; }
+    .bg-orange     { background-color: #fd7e14 !important; }
+    .stock-bajo    { color:#dc3545; font-weight:600; }
+    .stock-medio   { color:#fd7e14; font-weight:600; }
+    .stock-ok      { color:#198754; font-weight:600; }
+</style>
+
+<div class="container mt-4">
+    <h4 class="mb-3"><i class="bi bi-people-fill me-2 text-primary"></i>Panel del Programador</h4>
+
+    <!-- Tabs -->
+    <div class="border-bottom mb-3">
+        <button class="tab-btn @(_tab==0?"tab-active":"")" @onclick='()=>SetTab(0)'>
+            <i class="bi bi-clipboard-check me-1"></i>Órdenes
+        </button>
+        <button class="tab-btn @(_tab==1?"tab-active":"")" @onclick='()=>SetTab(1)'>
+            <i class="bi bi-calendar3 me-1"></i>Horarios
+        </button>
+        <button class="tab-btn @(_tab==2?"tab-active":"")" @onclick='()=>SetTab(2)'>
+            <i class="bi bi-boxes me-1"></i>Materiales
+        </button>
+    </div>
+
+    <!-- =================== TAB 0: ÓRDENES =================== -->
+    @if (_tab == 0)
+    {
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <span class="text-muted small">@_ordenes.Count orden(es) de sus técnicos</span>
+            <button class="btn btn-success btn-sm" @onclick="DescargarOrdenesExcel" disabled="@_descargandoOrdenes">
+                @if (_descargandoOrdenes) { <span class="spinner-border spinner-border-sm"></span> }
+                else { <i class="bi bi-file-earmark-excel me-1"></i> }
+                Exportar Excel
+            </button>
+        </div>
+
+        @if (_cargandoOrdenes)
+        {
+            <div class="text-center py-5"><span class="spinner-border text-primary"></span></div>
+        }
+        else if (!_ordenes.Any())
+        {
+            <div class="alert alert-info">No hay órdenes de trabajo para sus técnicos.</div>
+        }
+        else
+        {
+            @if (!string.IsNullOrEmpty(_mensajeOp))
+            {
+                <div class="alert alert-@_tipoMensaje alert-dismissible">
+                    @_mensajeOp
+                    <button type="button" class="btn-close" @onclick="()=>_mensajeOp=null"></button>
+                </div>
+            }
+            <table class="table table-hover align-middle shadow-sm">
+                <thead class="table-dark">
+                    <tr>
+                        <th style="width:36px"></th>
+                        <th>Folio</th>
+                        <th>Descripción</th>
+                        <th>Técnico</th>
+                        <th>Estado</th>
+                        <th>Urgencia</th>
+                        <th style="width:110px">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var orden in _ordenes)
+                    {
+                        var expandida = _expandidas.Contains(orden.Id);
+                        <tr>
+                            <td>
+                                <button class="btn btn-sm btn-outline-secondary py-0 px-1"
+                                        @onclick="()=>ToggleExpand(orden.Id)">
+                                    <i class="bi @(expandida?"bi-chevron-up":"bi-chevron-down")"></i>
+                                </button>
+                            </td>
+                            <td class="fw-bold text-primary">@orden.Folio</td>
+                            <td>@orden.Descripcion</td>
+                            <td>@(orden.TecnicoAsignadoNombre ?? "—")</td>
+                            <td><span class="badge @GetOrdenBadge(orden.Estado)">@orden.Estado</span></td>
+                            <td><span class="badge @GetUrgenciaBadge(orden.Urgencia)">@orden.Urgencia</span></td>
+                            <td>
+                                <a href="/añadir-operacion/@orden.Id" class="btn btn-sm btn-outline-primary" title="Gestionar operaciones">
+                                    <i class="bi bi-tools me-1"></i>Gestionar
+                                </a>
+                            </td>
+                        </tr>
+                        @if (expandida)
+                        {
+                            <tr class="expand-row">
+                                <td colspan="7" class="px-4 py-2">
+                                    @if (!orden.Operaciones.Any())
+                                    {
+                                        <p class="text-muted small mb-0">Sin operaciones registradas.</p>
+                                    }
+                                    else
+                                    {
+                                        <table class="table table-sm table-bordered mb-0 bg-white">
+                                            <thead class="table-secondary">
+                                                <tr>
+                                                    <th style="width:70px">N° Op.</th>
+                                                    <th>Función</th>
+                                                    <th style="width:75px">Horas</th>
+                                                    <th style="width:110px">Estado</th>
+                                                    <th style="width:140px">Materiales</th>
+                                                    <th style="width:100px">Acciones</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                @foreach (var op in orden.Operaciones.OrderBy(o => o.Numero))
+                                                {
+                                                    var tieneMat = op.SolicitudesMateriales != null && op.SolicitudesMateriales.Any();
+                                                    <tr>
+                                                        <td class="fw-bold text-primary">@op.Numero</td>
+                                                        <td>@op.Descripcion</td>
+                                                        <td>@op.HorasHombre h</td>
+                                                        <td><span class="badge @GetEstadoOpBadge(op.Estado)">@op.Estado</span></td>
+                                                        <td>
+                                                            @if (tieneMat)
+                                                            {
+                                                                <span class="badge bg-warning text-dark">
+                                                                    <i class="bi bi-box-seam me-1"></i>@op.SolicitudesMateriales!.Count() solicitados
+                                                                </span>
+                                                            }
+                                                            else { <span class="text-muted small">—</span> }
+                                                        </td>
+                                                        <td>
+                                                            <div class="btn-group btn-group-sm">
+                                                                <button class="btn btn-outline-info" title="Ver detalle"
+                                                                        @onclick="()=>AbrirVer(op)">
+                                                                    <i class="bi bi-eye"></i>
+                                                                </button>
+                                                                @if (tieneMat && op.Estado == EstadoOperacion.Pausa)
+                                                                {
+                                                                    <button class="btn btn-outline-success" title="Aprobar materiales"
+                                                                            @onclick="()=>AbrirAprobar(op, orden)">
+                                                                        <i class="bi bi-check-circle"></i>
+                                                                    </button>
+                                                                }
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                }
+                                            </tbody>
+                                        </table>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        }
+    }
+
+    <!-- =================== TAB 1: HORARIOS =================== -->
+    @if (_tab == 1)
+    {
+        @if (_tecnicos == null)
+        {
+            <div class="text-center py-5"><span class="spinner-border text-primary"></span></div>
+        }
+        else if (!_tecnicos.Any())
+        {
+            <div class="alert alert-info">No tiene técnicos asignados.</div>
+        }
+        else
+        {
+            <p class="text-muted mb-3">Seleccione un técnico para gestionar su horario semanal.</p>
+            <div class="row g-3">
+                @foreach (var tec in _tecnicos)
+                {
+                    <div class="col-md-4">
+                        <div class="card shadow-sm h-100">
+                            <div class="card-body">
+                                <h6 class="card-title fw-bold"><i class="bi bi-person-fill me-2 text-primary"></i>@tec.Nombre</h6>
+                                <p class="card-text text-muted small mb-3">@tec.Email</p>
+                                <a href="/programador/horario/@tec.Id" class="btn btn-sm btn-outline-primary w-100">
+                                    <i class="bi bi-calendar3 me-1"></i>Ver Horario
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+    }
+
+    <!-- =================== TAB 2: MATERIALES =================== -->
+    @if (_tab == 2)
+    {
+        <!-- Barra de herramientas -->
+        <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
+            <button class="btn btn-primary btn-sm" @onclick="AbrirNuevoMaterial">
+                <i class="bi bi-plus-circle me-1"></i>Nuevo Material
+            </button>
+            <button class="btn btn-outline-secondary btn-sm" @onclick="AbrirImportarExcel">
+                <i class="bi bi-upload me-1"></i>Carga masiva Excel
+            </button>
+            <button class="btn btn-outline-success btn-sm" @onclick="DescargarMaterialesExcel" disabled="@_descargandoMat">
+                @if (_descargandoMat) { <span class="spinner-border spinner-border-sm"></span> }
+                else { <i class="bi bi-file-earmark-excel me-1"></i> }
+                Exportar Excel
+            </button>
+            <button class="btn btn-outline-info btn-sm" @onclick="DescargarPlantilla" disabled="@_descargandoPlantilla">
+                @if (_descargandoPlantilla) { <span class="spinner-border spinner-border-sm"></span> }
+                else { <i class="bi bi-download me-1"></i> }
+                Plantilla importación
+            </button>
+            @if (!string.IsNullOrEmpty(_mensajeMat))
+            {
+                <span class="badge bg-@(_tipoMensajeMat=="success"?"success":"danger") ms-2">@_mensajeMat</span>
+            }
+        </div>
+
+        @if (_cargandoMat)
+        {
+            <div class="text-center py-5"><span class="spinner-border text-primary"></span></div>
+        }
+        else if (!_materiales.Any())
+        {
+            <div class="alert alert-info">No hay materiales registrados.</div>
+        }
+        else
+        {
+            <div class="card shadow-sm">
+                <div class="card-body p-0">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-dark">
+                            <tr>
+                                <th>Nombre</th>
+                                <th>Tipo</th>
+                                <th>Descripción</th>
+                                <th style="width:100px" class="text-center">Stock</th>
+                                <th style="width:110px" class="text-end">Precio Unit.</th>
+                                <th style="width:140px" class="text-center">Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var m in _materiales)
+                            {
+                                <tr>
+                                    <td class="fw-semibold">@m.Nombre</td>
+                                    <td><span class="badge bg-secondary">@m.TipoMaterial</span></td>
+                                    <td class="text-muted small">@(string.IsNullOrEmpty(m.Descripcion) ? "—" : m.Descripcion)</td>
+                                    <td class="text-center">
+                                        <span class="@(m.StockActual==0?"stock-bajo":m.StockActual<5?"stock-medio":"stock-ok")">
+                                            @m.StockActual
+                                        </span>
+                                    </td>
+                                    <td class="text-end">$@m.PrecioUnitario.ToString("N2")</td>
+                                    <td class="text-center">
+                                        <div class="btn-group btn-group-sm">
+                                            <button class="btn btn-outline-warning" title="Editar" @onclick="()=>AbrirEditarMaterial(m)">
+                                                <i class="bi bi-pencil"></i>
+                                            </button>
+                                            <button class="btn btn-outline-primary" title="Ajustar stock" @onclick="()=>AbrirAjusteStock(m)">
+                                                <i class="bi bi-sliders"></i>
+                                            </button>
+                                            <button class="btn btn-outline-danger" title="Eliminar" @onclick="()=>PedirConfirmEliminar(m)">
+                                                <i class="bi bi-trash"></i>
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        }
+    }
+</div>
+
+<!-- ===== MODAL VER DETALLE OPERACIÓN ===== -->
+@if (_opVer != null)
+{
+    <div class="modal-overlay" @onclick="()=>_opVer=null">
+        <div class="modal-box" style="max-width:560px" @onclick:stopPropagation>
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h5 class="mb-0"><i class="bi bi-eye me-2 text-info"></i>Operación @_opVer.Numero — Detalle</h5>
+                <span class="badge @GetEstadoOpBadge(_opVer.Estado)">@_opVer.Estado</span>
+            </div>
+            <p class="text-muted mb-3">@_opVer.Descripcion</p>
+            @if (_opVer.Estado == EstadoOperacion.Finalizada)
+            {
+                <dl class="row mb-0">
+                    <dt class="col-5">Fecha inicio</dt><dd class="col-7">@(_opVer.FechaInicio?.ToString("dd/MM/yyyy HH:mm") ?? "—")</dd>
+                    <dt class="col-5">Fecha fin</dt><dd class="col-7">@(_opVer.FechaFin?.ToString("dd/MM/yyyy HH:mm") ?? "—")</dd>
+                    <dt class="col-5">Detalle</dt><dd class="col-7">@(_opVer.DetalleFinalizacion ?? "—")</dd>
+                </dl>
+            }
+            else if (_opVer.Estado == EstadoOperacion.Pausa && _opVer.SolicitudesMateriales?.Any() == true)
+            {
+                <h6>Materiales solicitados</h6>
+                <table class="table table-sm table-bordered mb-0">
+                    <thead class="table-light"><tr><th>Material</th><th>Cantidad</th><th>Tipo</th></tr></thead>
+                    <tbody>
+                        @foreach (var s in _opVer.SolicitudesMateriales)
+                        {
+                            <tr>
+                                <td>@s.NombreMaterial</td>
+                                <td class="text-center">@s.Cantidad</td>
+                                <td><span class="badge @(s.EsPersonalizado?"bg-secondary":"bg-primary")">@(s.EsPersonalizado?"Personalizado":"Catálogo")</span></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+            else { <p class="text-muted fst-italic">Sin actividad registrada aún.</p> }
+            <div class="d-flex justify-content-end mt-3">
+                <button class="btn btn-secondary" @onclick="()=>_opVer=null">Cerrar</button>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- ===== MODAL APROBAR MATERIALES ===== -->
+@if (_opAprobar != null && _ordenAprobar != null)
+{
+    <div class="modal-overlay" @onclick="()=>_opAprobar=null">
+        <div class="modal-box" @onclick:stopPropagation>
+            <h5 class="mb-3"><i class="bi bi-check-circle-fill text-success me-2"></i>Aprobar Materiales</h5>
+            <p>Operación <strong>@_opAprobar.Numero</strong> — @_opAprobar.Descripcion</p>
+            <p class="text-muted small">Técnico: @(_ordenAprobar.TecnicoAsignadoNombre ?? "—")</p>
+            @if (_opAprobar.SolicitudesMateriales?.Any() == true)
+            {
+                <table class="table table-sm table-bordered mb-3">
+                    <thead class="table-light"><tr><th>Material</th><th>Cantidad</th><th>Tipo</th></tr></thead>
+                    <tbody>
+                        @foreach (var s in _opAprobar.SolicitudesMateriales)
+                        {
+                            <tr><td>@s.NombreMaterial</td><td class="text-center">@s.Cantidad</td>
+                            <td><span class="badge @(s.EsPersonalizado?"bg-secondary":"bg-primary")">@(s.EsPersonalizado?"Personalizado":"Catálogo")</span></td></tr>
+                        }
+                    </tbody>
+                </table>
+            }
+            <div class="mb-3">
+                <label class="form-label fw-semibold">Mensaje adicional al técnico</label>
+                <textarea class="form-control" rows="2" @bind="_mensajeAdicional" placeholder="Opcional…"></textarea>
+            </div>
+            @if (!string.IsNullOrEmpty(_aprobMensaje))
+            { <div class="alert alert-@_aprobTipo py-2 small mb-2">@_aprobMensaje</div> }
+            <div class="d-flex justify-content-end gap-2">
+                <button class="btn btn-outline-secondary" @onclick="()=>_opAprobar=null">Cancelar</button>
+                <button class="btn btn-success" @onclick="ConfirmarAprobacion" disabled="@_aprobando">
+                    @if (_aprobando) { <span class="spinner-border spinner-border-sm"></span> }
+                    else { <span><i class="bi bi-check-circle me-1"></i>Aprobar y notificar</span> }
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- ===== MODAL CREAR / EDITAR MATERIAL ===== -->
+@if (_matForm != null)
+{
+    <div class="modal-overlay" @onclick="()=>_matForm=null">
+        <div class="modal-box" @onclick:stopPropagation>
+            <h5 class="mb-3">
+                <i class="bi bi-@(_matEditId==Guid.Empty?"plus-circle":"pencil-square") me-2 text-primary"></i>
+                @(_matEditId==Guid.Empty ? "Nuevo Material" : "Editar Material")
+            </h5>
+            <div class="row g-3">
+                <div class="col-md-8">
+                    <label class="form-label fw-semibold">Nombre *</label>
+                    <input class="form-control" @bind="_matForm.Nombre" placeholder="Nombre del material" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label fw-semibold">Tipo *</label>
+                    <input class="form-control" @bind="_matForm.TipoMaterial" placeholder="Ej: Lubricante" />
+                </div>
+                <div class="col-12">
+                    <label class="form-label fw-semibold">Descripción</label>
+                    <textarea class="form-control" rows="2" @bind="_matForm.Descripcion" placeholder="Descripción opcional"></textarea>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label fw-semibold">Stock inicial</label>
+                    <input type="number" class="form-control" min="0" @bind="_matForm.StockActual" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label fw-semibold">Precio unitario</label>
+                    <input type="number" class="form-control" min="0" step="0.01" @bind="_matForm.PrecioUnitario" />
+                </div>
+            </div>
+            @if (!string.IsNullOrEmpty(_matFormError))
+            { <div class="alert alert-danger mt-3 py-2">@_matFormError</div> }
+            <div class="d-flex justify-content-end gap-2 mt-3">
+                <button class="btn btn-outline-secondary" @onclick="()=>_matForm=null">Cancelar</button>
+                <button class="btn btn-success" @onclick="GuardarMaterial" disabled="@_matGuardando">
+                    @if (_matGuardando) { <span class="spinner-border spinner-border-sm"></span> }
+                    else { <span><i class="bi bi-check-lg me-1"></i>Guardar</span> }
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- ===== MODAL AJUSTE DE STOCK ===== -->
+@if (_matAjuste != null)
+{
+    <div class="modal-overlay" @onclick="()=>_matAjuste=null">
+        <div class="modal-box modal-confirm" @onclick:stopPropagation>
+            <h5 class="mb-1"><i class="bi bi-sliders me-2 text-primary"></i>Ajuste de Stock</h5>
+            <p class="text-muted small mb-3">@_matAjuste.Nombre — Stock actual: <strong>@_matAjuste.StockActual</strong></p>
+            <label class="form-label fw-semibold">Ajuste *
+                <small class="text-muted fw-normal">(positivo = entrada, negativo = salida)</small>
+            </label>
+            <input type="number" class="form-control mb-3" @bind="_ajusteValor"
+                   placeholder="Ej: 10 o -5" />
+            @if (_ajusteValor != 0)
+            {
+                var nuevo = _matAjuste.StockActual + _ajusteValor;
+                <div class="alert alert-@(nuevo<0?"danger":"info") py-2 small mb-2">
+                    Resultado: @_matAjuste.StockActual @(_ajusteValor>=0?"+":"")@_ajusteValor = <strong>@nuevo</strong>
+                    @if (nuevo < 0) { <span> — insuficiente</span> }
+                </div>
+            }
+            @if (!string.IsNullOrEmpty(_ajusteError))
+            { <div class="alert alert-danger py-2 small mb-2">@_ajusteError</div> }
+            <div class="d-flex justify-content-end gap-2">
+                <button class="btn btn-outline-secondary" @onclick="()=>_matAjuste=null">Cancelar</button>
+                <button class="btn btn-primary" @onclick="ConfirmarAjusteStock" disabled="@(_ajusteGuardando||_ajusteValor==0)">
+                    @if (_ajusteGuardando) { <span class="spinner-border spinner-border-sm"></span> }
+                    else { <span><i class="bi bi-check-lg me-1"></i>Aplicar</span> }
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- ===== MODAL CONFIRMACIÓN ELIMINAR MATERIAL ===== -->
+@if (_matConfirm)
+{
+    <div class="modal-overlay">
+        <div class="modal-box modal-confirm">
+            <h5><i class="bi bi-exclamation-triangle-fill text-warning me-2"></i>Confirmar eliminación</h5>
+            <p>¿Eliminar el material <strong>@_matEliminar?.Nombre</strong>? Esta acción no se puede deshacer.</p>
+            <div class="d-flex justify-content-end gap-2">
+                <button class="btn btn-outline-secondary" @onclick="()=>_matConfirm=false">Cancelar</button>
+                <button class="btn btn-danger" @onclick="EjecutarEliminarMaterial">Sí, eliminar</button>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- ===== MODAL IMPORTACIÓN EXCEL ===== -->
+@if (_mostrarImport)
+{
+    <div class="modal-overlay" @onclick="()=>{ if(!_importando) _mostrarImport=false; }">
+        <div class="modal-box" style="max-width:700px" @onclick:stopPropagation>
+            <h5 class="mb-3"><i class="bi bi-upload me-2 text-primary"></i>Carga Masiva de Materiales</h5>
+
+            @if (_previewRows == null)
+            {
+                <p class="text-muted small mb-3">Sube un archivo Excel con columnas: <strong>Nombre, TipoMaterial, Descripcion, StockActual, PrecioUnitario</strong>. Descarga la plantilla si necesitas el formato.</p>
+                <InputFile OnChange="HandleFileChange" accept=".xlsx,.xls" class="form-control mb-3" />
+                @if (_importando)
+                { <div class="text-center py-2"><span class="spinner-border text-primary"></span> <span class="ms-2">Procesando...</span></div> }
+            }
+            else
+            {
+                <p class="small mb-2">
+                    <span class="badge bg-success me-1">@_previewRows.Count(r=>r.EsValido) válidas</span>
+                    <span class="badge bg-danger">@_previewRows.Count(r=>!r.EsValido) con error</span>
+                </p>
+                <div style="max-height:320px;overflow-y:auto">
+                    <table class="table table-sm table-bordered mb-0">
+                        <thead class="table-light sticky-top">
+                            <tr><th>#</th><th>Nombre</th><th>Tipo</th><th>Stock</th><th>Precio</th><th>Estado</th></tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var row in _previewRows)
+                            {
+                                <tr class="@(row.EsValido?"":"table-danger")">
+                                    <td>@row.Fila</td>
+                                    <td>@row.Nombre</td>
+                                    <td>@row.TipoMaterial</td>
+                                    <td>@row.StockActual</td>
+                                    <td>@row.PrecioUnitario.ToString("N2")</td>
+                                    <td>
+                                        @if (row.EsValido) { <span class="badge bg-success">OK</span> }
+                                        else { <span class="badge bg-danger" title="@row.Error">Error</span> }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+                @if (!string.IsNullOrEmpty(_importMensaje))
+                { <div class="alert alert-@_importTipo mt-2 py-2 small">@_importMensaje</div> }
+            }
+
+            <div class="d-flex justify-content-end gap-2 mt-3">
+                <button class="btn btn-outline-secondary" @onclick="()=>{ _mostrarImport=false; _previewRows=null; }" disabled="@_importando">Cerrar</button>
+                @if (_previewRows != null && _previewRows.Any(r => r.EsValido))
+                {
+                    <button class="btn btn-success" @onclick="ConfirmarImport" disabled="@_importando">
+                        @if (_importando) { <span class="spinner-border spinner-border-sm"></span> }
+                        else { <span><i class="bi bi-cloud-upload me-1"></i>Importar @_previewRows.Count(r=>r.EsValido) válidas</span> }
+                    </button>
+                }
+                @if (_previewRows != null)
+                {
+                    <button class="btn btn-outline-secondary btn-sm" @onclick="()=>_previewRows=null">
+                        <i class="bi bi-arrow-left me-1"></i>Otro archivo
+                    </button>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private int  _tab = 0;
+
+    // ── Órdenes ───────────────────────────────────────────────────────────────
+    private bool                  _cargandoOrdenes = true;
+    private List<OrdenTrabajoDto> _ordenes         = [];
+    private HashSet<Guid>         _expandidas      = [];
+    private bool                  _descargandoOrdenes;
+    private string?               _mensajeOp;
+    private string                _tipoMensaje = "success";
+
+    // Aprobar materiales
+    private OperacionDto?    _opVer;
+    private OperacionDto?    _opAprobar;
+    private OrdenTrabajoDto? _ordenAprobar;
+    private string           _mensajeAdicional = string.Empty;
+    private bool             _aprobando;
+    private string?          _aprobMensaje;
+    private string           _aprobTipo = "success";
+
+    // ── Horarios ──────────────────────────────────────────────────────────────
+    private List<UsuarioDto>? _tecnicos;
+
+    // ── Materiales ────────────────────────────────────────────────────────────
+    private bool               _cargandoMat;
+    private List<MaterialDto>  _materiales        = [];
+    private string?            _mensajeMat;
+    private string             _tipoMensajeMat    = "success";
+    private bool               _descargandoMat;
+    private bool               _descargandoPlantilla;
+
+    // Crear/Editar material
+    private MaterialDto? _matForm;
+    private Guid         _matEditId  = Guid.Empty;
+    private bool         _matGuardando;
+    private string?      _matFormError;
+
+    // Ajuste de stock
+    private MaterialDto? _matAjuste;
+    private int          _ajusteValor;
+    private bool         _ajusteGuardando;
+    private string?      _ajusteError;
+
+    // Eliminar material
+    private bool         _matConfirm;
+    private MaterialDto? _matEliminar;
+
+    // Importar Excel
+    private bool                      _mostrarImport;
+    private List<MaterialPreviewRow>? _previewRows;
+    private bool                      _importando;
+    private string?                   _importMensaje;
+    private string                    _importTipo = "success";
+
+    // ─────────────────────────────────────────────────────────────────────────
+
+    protected override async Task OnInitializedAsync()
+    {
+        try { await CargarOrdenes(); }
+        catch { _cargandoOrdenes = false; _mensajeOp = "Error al cargar las órdenes. Verifique la conexión con el servidor."; _tipoMensaje = "danger"; }
+    }
+
+    private async Task SetTab(int t)
+    {
+        _tab = t;
+        if (t == 1 && _tecnicos == null)
+            _tecnicos = await ProgramadorClient.GetTecnicosAsync();
+        if (t == 2 && !_materiales.Any() && !_cargandoMat)
+            await CargarMateriales();
+    }
+
+    // ── Órdenes ───────────────────────────────────────────────────────────────
+
+    private async Task CargarOrdenes()
+    {
+        _cargandoOrdenes = true;
+        _ordenes = await ProgramadorClient.GetOrdenesAsync();
+        _cargandoOrdenes = false;
+    }
+
+    private void ToggleExpand(Guid id) { if (!_expandidas.Add(id)) _expandidas.Remove(id); }
+    private void AbrirVer(OperacionDto op) => _opVer = op;
+    private void AbrirAprobar(OperacionDto op, OrdenTrabajoDto orden)
+    { _opAprobar = op; _ordenAprobar = orden; _aprobMensaje = null; _mensajeAdicional = string.Empty; }
+
+    private async Task ConfirmarAprobacion()
+    {
+        if (_opAprobar == null || _ordenAprobar == null) return;
+        var tecnicoId = _ordenAprobar.TecnicoAsignadoId ?? Guid.Empty;
+        if (tecnicoId == Guid.Empty) { _aprobMensaje = "La operación no tiene técnico asignado."; _aprobTipo = "warning"; return; }
+        _aprobando = true;
+        var req = new AprobacionMaterialRequest
+        {
+            OperacionId = _opAprobar.Id, TecnicoId = tecnicoId,
+            MensajeAdicional = string.IsNullOrWhiteSpace(_mensajeAdicional)
+                ? $"Materiales aprobados para operación {_opAprobar.Numero}." : _mensajeAdicional
+        };
+        var result = await ProgramadorClient.AprobarMaterialesAsync(req);
+        _aprobMensaje = result.IsSuccess ? "Materiales aprobados y técnico notificado." : result.ErrorMessage;
+        _aprobTipo    = result.IsSuccess ? "success" : "danger";
+        _aprobando    = false;
+        if (result.IsSuccess) { _mensajeOp = $"Materiales aprobados op. {_opAprobar.Numero}."; _opAprobar = null; await CargarOrdenes(); }
+    }
+
+    private async Task DescargarOrdenesExcel()
+    {
+        _descargandoOrdenes = true;
+        var bytes = await ProgramadorClient.ExportarOrdenesExcelAsync();
+        if (bytes != null)
+            await JS.InvokeVoidAsync("downloadFileFromBytes", $"ordenes_{DateTime.Now:yyyyMMdd}.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", bytes);
+        _descargandoOrdenes = false;
+    }
+
+    // ── Materiales ────────────────────────────────────────────────────────────
+
+    private async Task CargarMateriales()
+    {
+        _cargandoMat = true;
+        _materiales  = (await MaterialClient.GetAllAsync(pageSize: 500)).ToList();
+        _cargandoMat = false;
+    }
+
+    private void AbrirNuevoMaterial()
+    { _matEditId = Guid.Empty; _matForm = new MaterialDto(); _matFormError = null; }
+
+    private void AbrirEditarMaterial(MaterialDto m)
+    { _matEditId = m.Id; _matForm = new MaterialDto { Id=m.Id, Nombre=m.Nombre, TipoMaterial=m.TipoMaterial, Descripcion=m.Descripcion, StockActual=m.StockActual, PrecioUnitario=m.PrecioUnitario }; _matFormError = null; }
+
+    private async Task GuardarMaterial()
+    {
+        if (_matForm == null) return;
+        if (string.IsNullOrWhiteSpace(_matForm.Nombre)) { _matFormError = "El nombre es requerido."; return; }
+        if (string.IsNullOrWhiteSpace(_matForm.TipoMaterial)) { _matFormError = "El tipo de material es requerido."; return; }
+        _matGuardando = true; _matFormError = null;
+        if (_matEditId == Guid.Empty)
+            await MaterialClient.CreateAsync(_matForm);
+        else
+            await MaterialClient.UpdateAsync(_matForm);
+        _matGuardando = false; _matForm = null;
+        _mensajeMat = _matEditId == Guid.Empty ? "Material creado." : "Material actualizado.";
+        _tipoMensajeMat = "success";
+        await CargarMateriales();
+    }
+
+    private void AbrirAjusteStock(MaterialDto m)
+    { _matAjuste = m; _ajusteValor = 0; _ajusteError = null; }
+
+    private async Task ConfirmarAjusteStock()
+    {
+        if (_matAjuste == null || _ajusteValor == 0) return;
+        _ajusteGuardando = true; _ajusteError = null;
+        var result = await MaterialClient.AjustarStockAsync(_matAjuste.Id, _ajusteValor);
+        if (result.IsSuccess)
+        {
+            _mensajeMat = $"Stock de '{_matAjuste.Nombre}' ajustado en {(_ajusteValor>=0?"+":"")}{_ajusteValor}.";
+            _tipoMensajeMat = "success"; _matAjuste = null; await CargarMateriales();
+        }
+        else { _ajusteError = result.ErrorMessage; }
+        _ajusteGuardando = false;
+    }
+
+    private void PedirConfirmEliminar(MaterialDto m) { _matEliminar = m; _matConfirm = true; }
+
+    private async Task EjecutarEliminarMaterial()
+    {
+        if (_matEliminar == null) return;
+        _matConfirm = false;
+        var ok = await MaterialClient.DeleteAsync(_matEliminar.Id);
+        _mensajeMat     = ok ? $"'{_matEliminar.Nombre}' eliminado." : "El material está en uso y no puede eliminarse.";
+        _tipoMensajeMat = ok ? "success" : "danger";
+        _matEliminar = null;
+        if (ok) await CargarMateriales();
+    }
+
+    private async Task DescargarMaterialesExcel()
+    {
+        _descargandoMat = true;
+        var bytes = await MaterialClient.ExportarExcelAsync();
+        if (bytes != null)
+            await JS.InvokeVoidAsync("downloadFileFromBytes", $"materiales_{DateTime.Now:yyyyMMdd}.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", bytes);
+        _descargandoMat = false;
+    }
+
+    private async Task DescargarPlantilla()
+    {
+        _descargandoPlantilla = true;
+        var bytes = await MaterialClient.DescargarPlantillaAsync();
+        if (bytes != null)
+            await JS.InvokeVoidAsync("downloadFileFromBytes", "plantilla_materiales.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", bytes);
+        _descargandoPlantilla = false;
+    }
+
+    private void AbrirImportarExcel() { _mostrarImport = true; _previewRows = null; _importMensaje = null; }
+
+    private async Task HandleFileChange(InputFileChangeEventArgs e)
+    {
+        _importando = true;
+        await using var stream = e.File.OpenReadStream(maxAllowedSize: 5 * 1024 * 1024);
+        _previewRows = await MaterialClient.PreviewExcelAsync(stream, e.File.Name);
+        _importando = false;
+    }
+
+    private async Task ConfirmarImport()
+    {
+        if (_previewRows == null) return;
+        var validas = _previewRows.Where(r => r.EsValido)
+            .Select(r => new MaterialDto { Nombre=r.Nombre, TipoMaterial=r.TipoMaterial, Descripcion=r.Descripcion, StockActual=r.StockActual, PrecioUnitario=r.PrecioUnitario })
+            .ToList();
+        _importando = true;
+        var creados = await MaterialClient.BulkCreateAsync(validas);
+        _importMensaje = $"{creados} material(es) importado(s) correctamente.";
+        _importTipo    = "success";
+        _importando    = false;
+        await CargarMateriales();
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private static string MotivoPausaLabel(MotivoPausa? m) => m switch
+    {
+        MotivoPausa.FinTurno            => "Fin de turno",
+        MotivoPausa.NecesidadEquipos    => "Necesidad de equipos/materiales",
+        MotivoPausa.FueraAlcance        => "Fuera de alcance",
+        MotivoPausa.EquipoNoDisponible  => "Equipo no disponible",
+        MotivoPausa.AtenderOtroServicio => "Atender otro servicio",
+        _ => "—"
+    };
+
+    private static string GetOrdenBadge(EstadoOrden e) => e switch
+    {
+        EstadoOrden.Pendiente  => "bg-warning text-dark",
+        EstadoOrden.EnProceso  => "bg-info text-dark",
+        EstadoOrden.Finalizada => "bg-success",
+        EstadoOrden.Cancelada  => "bg-danger",
+        _ => "bg-secondary"
+    };
+
+    private static string GetUrgenciaBadge(NivelUrgencia u) => u switch
+    {
+        NivelUrgencia.Critica => "bg-danger",
+        NivelUrgencia.Alta    => "bg-warning text-dark",
+        NivelUrgencia.Media   => "bg-info text-dark",
+        _                     => "bg-secondary"
+    };
+
+    private static string GetEstadoOpBadge(EstadoOperacion e) => e switch
+    {
+        EstadoOperacion.Pendiente  => "bg-warning text-dark",
+        EstadoOperacion.EnProceso  => "bg-info text-dark",
+        EstadoOperacion.Pausa      => "bg-orange text-dark",
+        EstadoOperacion.Finalizada => "bg-success",
+        _ => "bg-secondary"
+    };
+}

@@ -1,0 +1,682 @@
+@page "/configuracion"
+@using Mantenimiento.Application.DTOs
+@using Mantenimiento.Web.Services
+@inject ConfiguracionClient ConfiguracionClient
+@inject CorreoQueueClient QueueClient
+@inject ProgramadorClient ProgramadorClient
+@attribute [Authorize(Roles = "Administrador")]
+
+<PageTitle>Configuración — FixOps</PageTitle>
+
+<style>
+    .tab-btn       { background:none;border:none;padding:.5rem 1.25rem;cursor:pointer;color:#6c757d; }
+    .tab-btn:hover { color:#0d6efd; }
+    .tab-active    { border-bottom:3px solid #0d6efd;color:#0d6efd;font-weight:600; }
+    .badge-Pendiente  { background:#ffc107;color:#000; }
+    .badge-Procesando { background:#0dcaf0;color:#000; }
+    .badge-Enviado    { background:#198754;color:#fff; }
+    .badge-Fallido    { background:#dc3545;color:#fff; }
+</style>
+
+<div class="container mt-4" style="max-width:800px">
+    <h4 class="mb-1"><i class="bi bi-gear-fill me-2 text-primary"></i>Configuración del Sistema</h4>
+    <p class="text-muted small mb-3">Gestione el servidor de correo y consulte el historial de envíos.</p>
+
+    <!-- Tabs -->
+    <div class="border-bottom mb-4">
+        <button class="tab-btn @(_tab==0?"tab-active":"")" @onclick='()=>SetTab(0)'>
+            <i class="bi bi-envelope-gear me-1"></i>Correo SMTP
+        </button>
+        <button class="tab-btn @(_tab==1?"tab-active":"")" @onclick='()=>SetTab(1)'>
+            <i class="bi bi-list-ul me-1"></i>Cola de envíos
+            @if (_stats?.Fallidos > 0)
+            { <span class="badge bg-danger ms-1">@_stats.Fallidos</span> }
+            @if (_stats?.Pendientes > 0)
+            { <span class="badge bg-warning text-dark ms-1">@_stats.Pendientes</span> }
+        </button>
+        <button class="tab-btn @(_tab==2?"tab-active":"")" @onclick='()=>SetTab(2)'>
+            <i class="bi bi-clock-history me-1"></i>Horarios
+        </button>
+    </div>
+
+    @if (_cargando)
+    {
+        <div class="text-center py-5"><span class="spinner-border text-primary"></span></div>
+    }
+    else if (_tab == 0)
+    {
+        <!-- ── SMTP ──────────────────────────────────────────────────────── -->
+        <div class="card shadow-sm mb-4">
+            <div class="card-header bg-white fw-semibold py-3">
+                <i class="bi bi-envelope-fill me-2 text-primary"></i>Configuración de Correo (SMTP)
+            </div>
+            <div class="card-body">
+                <div class="row g-3">
+
+                    <div class="col-md-8">
+                        <label class="form-label fw-semibold">Servidor SMTP <span class="text-danger">*</span></label>
+                        <input class="form-control" @bind="_dto.SmtpHost"
+                               placeholder="Ej: smtp.office365.com  /  smtp.gmail.com" />
+                        <div class="form-text">Para Outlook/Office 365: <code>smtp.office365.com</code></div>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label fw-semibold">Puerto <span class="text-danger">*</span></label>
+                        <input type="number" class="form-control" @bind="_dto.SmtpPort" min="1" max="65535" />
+                        <div class="form-text">587 (TLS) · 465 (SSL) · 25</div>
+                    </div>
+
+                    <div class="col-md-6">
+                        <label class="form-label fw-semibold">Usuario / Email de la cuenta <span class="text-danger">*</span></label>
+                        <input class="form-control" @bind="_dto.SmtpUser"
+                               placeholder="tu.correo@outlook.com" autocomplete="username" />
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label fw-semibold">Contraseña</label>
+                        <div class="input-group">
+                            <input type="@(_verPass?"text":"password")" class="form-control"
+                                   @bind="_dto.SmtpPassword"
+                                   placeholder="@(_tienePassword?"(sin cambios)":"Ingresar contraseña")"
+                                   autocomplete="current-password" />
+                            <button class="btn btn-outline-secondary" type="button"
+                                    @onclick="()=>_verPass=!_verPass" title="Mostrar/ocultar">
+                                <i class="bi @(_verPass?"bi-eye-slash":"bi-eye")"></i>
+                            </button>
+                        </div>
+                        @if (_tienePassword)
+                        {
+                            <div class="form-text text-success"><i class="bi bi-check-circle me-1"></i>Contraseña guardada. Déjela vacía para no cambiarla.</div>
+                        }
+                    </div>
+
+                    <div class="col-md-6">
+                        <label class="form-label fw-semibold">Email remitente</label>
+                        <input class="form-control" @bind="_dto.FromEmail"
+                               placeholder="Igual que el usuario si se deja vacío" />
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label fw-semibold">Nombre remitente</label>
+                        <input class="form-control" @bind="_dto.FromName" placeholder="FixOps" />
+                    </div>
+
+                    <div class="col-12">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="sslSwitch"
+                                   @bind="_dto.EnableSsl" />
+                            <label class="form-check-label" for="sslSwitch">
+                                Habilitar SSL/TLS <span class="text-muted small">(recomendado)</span>
+                            </label>
+                        </div>
+                    </div>
+
+                </div>
+
+                @if (!string.IsNullOrEmpty(_mensajeGuardar))
+                {
+                    <div class="alert alert-@_tipoGuardar mt-3 py-2 mb-0">
+                        <i class="bi @(_tipoGuardar=="success"?"bi-check-circle":"bi-exclamation-triangle") me-2"></i>@_mensajeGuardar
+                    </div>
+                }
+
+                <div class="d-flex justify-content-end mt-3">
+                    <button class="btn btn-primary px-4" @onclick="Guardar" disabled="@_guardando">
+                        @if (_guardando) { <span class="spinner-border spinner-border-sm me-2"></span> }
+                        else { <i class="bi bi-floppy me-2"></i> }
+                        Guardar configuración
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── PRUEBA ────────────────────────────────────────────────────── -->
+        <div class="card shadow-sm">
+            <div class="card-header bg-white fw-semibold py-3">
+                <i class="bi bi-send-fill me-2 text-success"></i>Envío de Prueba
+            </div>
+            <div class="card-body">
+                <p class="text-muted small mb-3">
+                    Envía un correo de prueba para verificar que la configuración sea correcta.
+                    Guarda los cambios antes de probar.
+                </p>
+                <div class="row g-2 align-items-end">
+                    <div class="col-md-8">
+                        <label class="form-label fw-semibold">Enviar a</label>
+                        <input class="form-control" @bind="_emailPrueba"
+                               placeholder="tu.email@ejemplo.com" type="email" />
+                    </div>
+                    <div class="col-md-4">
+                        <button class="btn btn-success w-100" @onclick="EnviarPrueba" disabled="@_enviando">
+                            @if (_enviando) { <span class="spinner-border spinner-border-sm me-2"></span> }
+                            else { <i class="bi bi-send me-2"></i> }
+                            Enviar prueba
+                        </button>
+                    </div>
+                </div>
+
+                @if (!string.IsNullOrEmpty(_mensajePrueba))
+                {
+                    <div class="alert alert-@_tipoPrueba mt-3 py-2 mb-0">
+                        <i class="bi @(_tipoPrueba=="success"?"bi-check-circle-fill":"bi-x-circle-fill") me-2"></i>
+                        @_mensajePrueba
+                    </div>
+                }
+            </div>
+        </div>
+    }
+    else if (_tab == 1)
+    {
+        <!-- ── COLA DE CORREOS ───────────────────────────────────────────── -->
+        <!-- Stats -->
+        @if (_stats != null)
+        {
+            <div class="row g-2 mb-3">
+                <div class="col-6 col-md-3">
+                    <div class="card text-center border-warning">
+                        <div class="card-body py-2">
+                            <div class="fs-4 fw-bold text-warning">@_stats.Pendientes</div>
+                            <div class="small text-muted">Pendientes</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-6 col-md-3">
+                    <div class="card text-center border-info">
+                        <div class="card-body py-2">
+                            <div class="fs-4 fw-bold text-info">@_stats.Procesando</div>
+                            <div class="small text-muted">Procesando</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-6 col-md-3">
+                    <div class="card text-center border-success">
+                        <div class="card-body py-2">
+                            <div class="fs-4 fw-bold text-success">@_stats.Enviados</div>
+                            <div class="small text-muted">Enviados</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-6 col-md-3">
+                    <div class="card text-center border-danger">
+                        <div class="card-body py-2">
+                            <div class="fs-4 fw-bold text-danger">@_stats.Fallidos</div>
+                            <div class="small text-muted">Fallidos</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+
+        <!-- Toolbar -->
+        <div class="d-flex gap-2 mb-3 flex-wrap">
+            <select class="form-select form-select-sm" style="max-width:160px" @bind="_filtroEstado">
+                <option value="">Todos los estados</option>
+                <option>Pendiente</option>
+                <option>Procesando</option>
+                <option>Enviado</option>
+                <option>Fallido</option>
+            </select>
+            <button class="btn btn-sm btn-outline-primary" @onclick="CargarCola">
+                <i class="bi bi-arrow-clockwise me-1"></i>Actualizar
+            </button>
+            @if (_stats?.Fallidos > 0)
+            {
+                <button class="btn btn-sm btn-warning" @onclick="ReintentarFallidos" disabled="@_reintentando">
+                    @if (_reintentando) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                    else { <i class="bi bi-arrow-repeat me-1"></i> }
+                    Reintentar todos los fallidos (@_stats.Fallidos)
+                </button>
+            }
+            @if (!string.IsNullOrEmpty(_mensajeCola))
+            { <span class="badge bg-@(_tipoCola=="success"?"success":"danger") align-self-center">@_mensajeCola</span> }
+        </div>
+
+        <!-- Table -->
+        @if (_cargandoCola)
+        {
+            <div class="text-center py-4"><span class="spinner-border text-primary"></span></div>
+        }
+        else if (!_correosQueue.Any())
+        {
+            <div class="alert alert-info">No hay correos en la cola con los filtros actuales.</div>
+        }
+        else
+        {
+            <div class="card shadow-sm">
+                <div class="card-body p-0">
+                    <table class="table table-hover align-middle mb-0 small">
+                        <thead class="table-dark">
+                            <tr>
+                                <th>Destinatario</th>
+                                <th>Asunto</th>
+                                <th style="width:90px">Tipo</th>
+                                <th style="width:90px">Estado</th>
+                                <th style="width:70px" class="text-center">Intentos</th>
+                                <th style="width:130px">Fecha</th>
+                                <th style="width:80px"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var c in _correosQueue)
+                            {
+                                <tr>
+                                    <td>@c.Destinatario</td>
+                                    <td class="text-truncate" style="max-width:200px" title="@c.Asunto">@c.Asunto</td>
+                                    <td><span class="badge bg-secondary">@c.TipoCorreo</span></td>
+                                    <td>
+                                        <span class="badge badge-@c.Estado">@c.Estado</span>
+                                        @if (!string.IsNullOrEmpty(c.ErrorMensaje))
+                                        {
+                                            <i class="bi bi-info-circle ms-1 text-danger" title="@c.ErrorMensaje"></i>
+                                        }
+                                    </td>
+                                    <td class="text-center">@c.Intentos / @c.MaxIntentos</td>
+                                    <td class="text-nowrap">@c.FechaCreacion.ToLocalTime().ToString("dd/MM HH:mm")</td>
+                                    <td>
+                                        @if (c.Estado is "Fallido" or "Pendiente")
+                                        {
+                                            <button class="btn btn-outline-primary btn-sm py-0"
+                                                    @onclick="()=>ReintentarUno(c.Id)" title="Reintentar">
+                                                <i class="bi bi-arrow-repeat"></i>
+                                            </button>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="text-muted small mt-2">@_correosQueue.Count correo(s) — el worker procesa automáticamente cada 30 s.</div>
+        }
+    }
+    else if (_tab == 2)
+    {
+        <!-- ── HORARIOS ──────────────────────────────────────────────────── -->
+
+        <!-- Parámetros generales -->
+        <div class="card shadow-sm mb-4">
+            <div class="card-header bg-white fw-semibold py-3">
+                <i class="bi bi-sliders me-2 text-primary"></i>Parámetros de jornada laboral
+            </div>
+            <div class="card-body">
+                @if (_cfgHorario == null)
+                {
+                    <div class="text-center py-3"><span class="spinner-border text-primary"></span></div>
+                }
+                else
+                {
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <label class="form-label fw-semibold">Horas semanales máximas</label>
+                            <input type="number" class="form-control" @bind="_cfgHorario.HorasSemanalesMaximas" min="1" max="168" />
+                            <div class="form-text">Límite legal o convenio colectivo (ej. 42).</div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-semibold">Horas extras máximas / semana</label>
+                            <input type="number" class="form-control" @bind="_cfgHorario.HorasExtrasMaximas" min="0" max="40" />
+                            <div class="form-text">Máximo de horas adicionales permitidas.</div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-semibold">Horas efectivas diarias</label>
+                            <input type="number" class="form-control" @bind="_cfgHorario.HorasDiariasEfectivas" min="1" max="24" />
+                            <div class="form-text">Horas de trabajo real sin contar almuerzo.</div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-semibold">Hora de inicio predeterminada</label>
+                            <input type="time" class="form-control"
+                                   value="@_cfgHorario.HoraInicioDefault.ToString("HH:mm")"
+                                   @onchange="OnHoraInicioChange" />
+                        </div>
+                        <div class="col-md-4 d-flex align-items-center pt-3">
+                            <div class="form-check form-switch mt-2">
+                                <input class="form-check-input" type="checkbox" id="almSwitch"
+                                       @bind="_cfgHorario.AlmuerzoPagadoEnJornada" />
+                                <label class="form-check-label" for="almSwitch">
+                                    Almuerzo pagado en jornada
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(_mensajeCfgHorario))
+                    {
+                        <div class="alert alert-@_tipoCfgHorario mt-3 py-2 mb-0">
+                            <i class="bi @(_tipoCfgHorario=="success"?"bi-check-circle":"bi-exclamation-triangle") me-2"></i>@_mensajeCfgHorario
+                        </div>
+                    }
+
+                    <div class="d-flex justify-content-end mt-3">
+                        <button class="btn btn-primary px-4" @onclick="GuardarCfgHorario" disabled="@_guardandoCfgHorario">
+                            @if (_guardandoCfgHorario) { <span class="spinner-border spinner-border-sm me-2"></span> }
+                            else { <i class="bi bi-floppy me-2"></i> }
+                            Guardar parámetros
+                        </button>
+                    </div>
+                }
+            </div>
+        </div>
+
+        <!-- Recomendaciones de horario -->
+        <div class="card shadow-sm">
+            <div class="card-header bg-white fw-semibold py-3 d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-calendar-week me-2 text-primary"></i>Recomendaciones de horario</span>
+                <button class="btn btn-sm btn-outline-primary" @onclick="AbrirNuevaRec">
+                    <i class="bi bi-plus-circle me-1"></i>Nueva recomendación
+                </button>
+            </div>
+            <div class="card-body p-0">
+                @if (_cargandoRec)
+                {
+                    <div class="text-center py-4"><span class="spinner-border text-primary"></span></div>
+                }
+                else if (!_recomendaciones.Any())
+                {
+                    <div class="alert alert-info m-3">No hay recomendaciones definidas.</div>
+                }
+                else
+                {
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-dark">
+                            <tr>
+                                <th>Nombre</th>
+                                <th>Hora inicio</th>
+                                <th>Hora fin</th>
+                                <th>Duración</th>
+                                <th style="width:80px">Estado</th>
+                                <th style="width:100px"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var rec in _recomendaciones)
+                            {
+                                var horas = (rec.HoraFin - rec.HoraInicio).TotalHours;
+                                <tr class="@(!rec.Activo?"text-muted":"")">
+                                    <td class="fw-semibold">@rec.Nombre</td>
+                                    <td>@rec.HoraInicio.ToString("HH:mm")</td>
+                                    <td>@rec.HoraFin.ToString("HH:mm")</td>
+                                    <td>@horas.ToString("F1") h</td>
+                                    <td>
+                                        <span class="badge @(rec.Activo?"bg-success":"bg-secondary")">
+                                            @(rec.Activo ? "Activo" : "Inactivo")
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <button class="btn btn-sm btn-outline-secondary me-1" @onclick="()=>AbrirEditarRec(rec)" title="Editar">
+                                            <i class="bi bi-pencil"></i>
+                                        </button>
+                                        <button class="btn btn-sm btn-outline-danger" @onclick="()=>EliminarRec(rec.Id)" title="Eliminar">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            </div>
+        </div>
+
+        @if (!string.IsNullOrEmpty(_mensajeRec))
+        {
+            <div class="alert alert-@_tipoRec mt-3 py-2">
+                <i class="bi @(_tipoRec=="success"?"bi-check-circle":"bi-exclamation-triangle") me-2"></i>@_mensajeRec
+            </div>
+        }
+
+        <!-- Modal nueva/editar recomendación -->
+        @if (_mostrarFormRec)
+        {
+            <div class="modal-backdrop" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.45);z-index:1040"></div>
+            <div class="modal d-block" tabindex="-1" style="z-index:1050">
+                <div class="modal-dialog modal-dialog-centered" style="max-width:440px">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title">@(_editRecId == Guid.Empty ? "Nueva" : "Editar") recomendación</h5>
+                            <button class="btn-close" @onclick="CerrarFormRec"></button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="mb-3">
+                                <label class="form-label fw-semibold">Nombre <span class="text-danger">*</span></label>
+                                <input class="form-control" @bind="_recNombre" placeholder="Ej: Mañana, Tarde-Noche..." />
+                            </div>
+                            <div class="row g-3">
+                                <div class="col-6">
+                                    <label class="form-label fw-semibold">Hora inicio</label>
+                                    <input type="time" class="form-control"
+                                           value="@_recHoraInicio.ToString("HH:mm")"
+                                           @onchange="e => TimeOnly.TryParse(e.Value?.ToString(), out _recHoraInicio)" />
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label fw-semibold">Hora fin</label>
+                                    <input type="time" class="form-control"
+                                           value="@_recHoraFin.ToString("HH:mm")"
+                                           @onchange="e => TimeOnly.TryParse(e.Value?.ToString(), out _recHoraFin)" />
+                                </div>
+                            </div>
+                            <div class="mt-3 form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="recActivoSwitch" @bind="_recActivo" />
+                                <label class="form-check-label" for="recActivoSwitch">Activo</label>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button class="btn btn-secondary" @onclick="CerrarFormRec">Cancelar</button>
+                            <button class="btn btn-primary" @onclick="GuardarRec" disabled="@_guardandoRec">
+                                @if (_guardandoRec) { <span class="spinner-border spinner-border-sm me-2"></span> }
+                                Guardar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+    }
+</div>
+
+@code {
+    private int                          _tab           = 0;
+    private ConfiguracionCorreoDto _dto           = new();
+    private bool                   _cargando      = true;
+    private bool                   _guardando;
+    private bool                   _enviando;
+    private bool                   _verPass;
+    private bool                   _tienePassword; // indicates DB already has a password stored
+
+    private string  _emailPrueba    = string.Empty;
+    private string? _mensajeGuardar;
+    private string  _tipoGuardar    = "success";
+    private string? _mensajePrueba;
+    private string  _tipoPrueba     = "success";
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var conf = await ConfiguracionClient.GetCorreoAsync();
+            if (conf != null)
+            {
+                _dto = conf;
+                _tienePassword = !string.IsNullOrWhiteSpace(conf.SmtpUser); // proxy: if user is set, password likely exists
+            }
+        }
+        catch { }
+        _cargando = false;
+    }
+
+    private async Task Guardar()
+    {
+        _guardando      = true;
+        _mensajeGuardar = null;
+        var result = await ConfiguracionClient.UpdateCorreoAsync(_dto);
+        _mensajeGuardar = result.IsSuccess ? "Configuración guardada correctamente." : result.ErrorMessage;
+        _tipoGuardar    = result.IsSuccess ? "success" : "danger";
+        if (result.IsSuccess) { _tienePassword = !string.IsNullOrWhiteSpace(_dto.SmtpUser); _dto.SmtpPassword = string.Empty; }
+        _guardando = false;
+    }
+
+    private async Task EnviarPrueba()
+    {
+        if (string.IsNullOrWhiteSpace(_emailPrueba))
+        {
+            _mensajePrueba = "Ingrese un email de destino.";
+            _tipoPrueba    = "warning";
+            return;
+        }
+        _enviando      = true;
+        _mensajePrueba = null;
+        var result = await ConfiguracionClient.EnviarPruebaAsync(_emailPrueba);
+        _mensajePrueba = result.IsSuccess
+            ? $"¡Correo enviado a {_emailPrueba}! Revise su bandeja de entrada."
+            : result.ErrorMessage;
+        _tipoPrueba = result.IsSuccess ? "success" : "danger";
+        _enviando   = false;
+    }
+
+    // ── Tab Cola ──────────────────────────────────────────────────────────────
+    private List<CorreoEncoladoDto> _correosQueue   = [];
+    private CorreoQueueStatsDto?    _stats;
+    private bool                    _cargandoCola;
+    private bool                    _reintentando;
+    private string?                 _mensajeCola;
+    private string                  _tipoCola       = "success";
+    private string                  _filtroEstado   = string.Empty;
+
+    private async Task SetTab(int t)
+    {
+        _tab = t;
+        if (t == 1) await CargarCola();
+        if (t == 2) await CargarTabHorarios();
+    }
+
+    private async Task CargarCola()
+    {
+        _cargandoCola = true;
+        try
+        {
+            _stats        = await QueueClient.GetStatsAsync();
+            _correosQueue = (await QueueClient.GetAllAsync(new CorreoQueueFilter
+            {
+                Estado   = string.IsNullOrWhiteSpace(_filtroEstado) ? null : _filtroEstado,
+                PageSize = 100
+            })).ToList();
+        }
+        catch { }
+        _cargandoCola = false;
+    }
+
+    private async Task ReintentarUno(Guid id)
+    {
+        var r = await QueueClient.ReintentarAsync(id);
+        _mensajeCola = r.IsSuccess ? "Correo reencolado." : r.ErrorMessage;
+        _tipoCola    = r.IsSuccess ? "success" : "danger";
+        await CargarCola();
+    }
+
+    private async Task ReintentarFallidos()
+    {
+        _reintentando = true;
+        var r = await QueueClient.ReintentarFallidosAsync();
+        _mensajeCola = r.IsSuccess ? "Fallidos reencolados." : r.ErrorMessage;
+        _tipoCola    = r.IsSuccess ? "success" : "danger";
+        _reintentando = false;
+        await CargarCola();
+    }
+
+    // ── Tab Horarios ──────────────────────────────────────────────────────────
+    private ConfiguracionEmpresaDto?      _cfgHorario;
+    private bool                          _guardandoCfgHorario;
+    private string?                       _mensajeCfgHorario;
+    private string                        _tipoCfgHorario  = "success";
+
+    private List<RecomendacionHorarioDto> _recomendaciones = [];
+    private bool                          _cargandoRec;
+    private string?                       _mensajeRec;
+    private string                        _tipoRec         = "success";
+
+    // Form state for modal
+    private bool    _mostrarFormRec;
+    private bool    _guardandoRec;
+    private Guid    _editRecId;
+    private string  _recNombre    = string.Empty;
+    private TimeOnly _recHoraInicio = new TimeOnly(7, 0);
+    private TimeOnly _recHoraFin   = new TimeOnly(15, 0);
+    private bool    _recActivo    = true;
+
+    private async Task CargarTabHorarios()
+    {
+        _cfgHorario  = await ProgramadorClient.GetConfiguracionAsync();
+        _cargandoRec = true;
+        _recomendaciones = await ProgramadorClient.GetRecomendacionesAsync();
+        _cargandoRec = false;
+    }
+
+    private void OnHoraInicioChange(ChangeEventArgs e)
+    {
+        if (_cfgHorario != null && TimeOnly.TryParse(e.Value?.ToString(), out var t))
+            _cfgHorario.HoraInicioDefault = t;
+    }
+
+    private async Task GuardarCfgHorario()
+    {
+        if (_cfgHorario == null) return;
+        _guardandoCfgHorario = true;
+        _mensajeCfgHorario   = null;
+        var r = await ProgramadorClient.ActualizarConfiguracionAsync(_cfgHorario);
+        _mensajeCfgHorario   = r.IsSuccess ? "Parámetros guardados correctamente." : r.ErrorMessage;
+        _tipoCfgHorario      = r.IsSuccess ? "success" : "danger";
+        _guardandoCfgHorario = false;
+    }
+
+    private void AbrirNuevaRec()
+    {
+        _editRecId     = Guid.Empty;
+        _recNombre     = string.Empty;
+        _recHoraInicio = new TimeOnly(7, 0);
+        _recHoraFin    = new TimeOnly(15, 0);
+        _recActivo     = true;
+        _mostrarFormRec = true;
+    }
+
+    private void AbrirEditarRec(RecomendacionHorarioDto rec)
+    {
+        _editRecId      = rec.Id;
+        _recNombre      = rec.Nombre;
+        _recHoraInicio  = rec.HoraInicio;
+        _recHoraFin     = rec.HoraFin;
+        _recActivo      = rec.Activo;
+        _mostrarFormRec = true;
+    }
+
+    private void CerrarFormRec() => _mostrarFormRec = false;
+
+    private async Task GuardarRec()
+    {
+        if (string.IsNullOrWhiteSpace(_recNombre)) return;
+        _guardandoRec = true;
+        _mensajeRec   = null;
+
+        var dto = new RecomendacionHorarioDto
+        {
+            Id         = _editRecId,
+            Nombre     = _recNombre,
+            HoraInicio = _recHoraInicio,
+            HoraFin    = _recHoraFin,
+            Activo     = _recActivo
+        };
+
+        var r = _editRecId == Guid.Empty
+            ? await ProgramadorClient.CrearRecomendacionAsync(dto)
+            : await ProgramadorClient.ActualizarRecomendacionAsync(dto);
+
+        _mensajeRec   = r.IsSuccess ? "Recomendación guardada." : r.ErrorMessage;
+        _tipoRec      = r.IsSuccess ? "success" : "danger";
+        _guardandoRec = false;
+        _mostrarFormRec = false;
+        if (r.IsSuccess) _recomendaciones = await ProgramadorClient.GetRecomendacionesAsync();
+    }
+
+    private async Task EliminarRec(Guid id)
+    {
+        var r = await ProgramadorClient.EliminarRecomendacionAsync(id);
+        _mensajeRec = r.IsSuccess ? "Recomendación eliminada." : r.ErrorMessage;
+        _tipoRec    = r.IsSuccess ? "success" : "danger";
+        if (r.IsSuccess) _recomendaciones = await ProgramadorClient.GetRecomendacionesAsync();
+    }
+}

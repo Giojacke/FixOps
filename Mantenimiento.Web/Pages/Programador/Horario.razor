@@ -1,0 +1,384 @@
+@page "/programador/horario/{TecnicoId:guid}"
+@using Mantenimiento.Application.DTOs
+@using Mantenimiento.Web.Services
+@inject ProgramadorClient ProgramadorClient
+@inject NavigationManager Nav
+@attribute [Authorize(Roles = "Programador")]
+
+<style>
+    .grid-horario th, .grid-horario td { text-align:center;vertical-align:middle;padding:6px 4px; }
+    .turno-cell  { background:#d1e7dd;border-radius:6px;cursor:pointer;font-size:.82rem;padding:4px 6px; }
+    .turno-vacio { background:#f8f9fa;border-radius:6px;cursor:pointer;font-size:.78rem;color:#adb5bd;padding:4px 6px; }
+    .turno-cell:hover, .turno-vacio:hover { opacity:.8; }
+    .modal-overlay { position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.5);z-index:1050;display:flex;align-items:center;justify-content:center; }
+    .modal-box     { background:#fff;border-radius:8px;padding:24px;min-width:380px;max-width:500px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.3); }
+</style>
+
+<div class="container mt-4">
+    <div class="d-flex align-items-center gap-3 mb-3">
+        <button class="btn btn-outline-secondary btn-sm" @onclick="Volver">
+            <i class="bi bi-arrow-left"></i>
+        </button>
+        <h2 class="mb-0"><i class="bi bi-calendar-week me-2 text-primary"></i>Horario — @_tecnicoNombre</h2>
+    </div>
+
+    <!-- ===== CONTROLES ===== -->
+    <div class="card shadow-sm mb-4">
+        <div class="card-body py-2">
+            <div class="row g-2 align-items-end">
+                <div class="col-md-3">
+                    <label class="form-label fw-semibold mb-1 small">Período</label>
+                    <select class="form-select form-select-sm" @bind="_periodo">
+                        <option value="Semanal">Semanal</option>
+                        <option value="Quincenal">Quincenal</option>
+                        <option value="Mensual">Mensual</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label fw-semibold mb-1 small">Fecha inicio</label>
+                    <input type="date" class="form-control form-control-sm"
+                           value="@_fechaInicioStr"
+                           @onchange="e => _fechaInicioStr = e.Value?.ToString() ?? _fechaInicioStr" />
+                </div>
+                <div class="col-md-6 d-flex gap-2 align-items-end">
+                    <button class="btn btn-outline-primary btn-sm" @onclick="Cargar">
+                        <i class="bi bi-search me-1"></i>Ver
+                    </button>
+                    <button class="btn btn-success btn-sm" @onclick="Sugerir" disabled="@_cargando">
+                        <i class="bi bi-magic me-1"></i>Sugerir automático
+                    </button>
+                    @if (_turnosEditados.Any())
+                    {
+                        <button class="btn btn-primary btn-sm" @onclick="Guardar" disabled="@_guardando">
+                            @if (_guardando) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                            <i class="bi bi-floppy me-1"></i>Guardar
+                        </button>
+                        <button class="btn btn-outline-secondary btn-sm" @onclick="Descartar">
+                            Descartar
+                        </button>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(_mensaje))
+    {
+        <div class="alert alert-@_tipoMensaje alert-dismissible mb-3">
+            @_mensaje <button class="btn-close" @onclick="()=>_mensaje=null"></button>
+        </div>
+    }
+
+    <!-- ===== LEYENDA ===== -->
+    <div class="d-flex gap-3 mb-2 small text-muted align-items-center">
+        <span><span class="badge bg-success me-1">&nbsp;</span>Turno guardado</span>
+        <span><span class="badge bg-warning text-dark me-1">&nbsp;</span>Nuevo (sin guardar)</span>
+        <span><i class="bi bi-pencil me-1"></i>Haz clic en una celda para editar</span>
+    </div>
+
+    @if (_cargando)
+    {
+        <p><span class="spinner-border spinner-border-sm me-2"></span>Cargando...</p>
+    }
+    else if (_fechasGrid.Any())
+    {
+        <!-- ===== GRID HORARIO ===== -->
+        <div class="table-responsive">
+            <table class="table table-bordered grid-horario">
+                <thead class="table-dark">
+                    <tr>
+                        <th style="width:100px">Fecha</th>
+                        <th style="width:80px">Día</th>
+                        <th>Turno</th>
+                        <th style="width:90px">Horas ef.</th>
+                        <th style="width:80px">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @{
+                        var semanaActual = -1;
+                        double totalSemana = 0;
+                    }
+                    @foreach (var fecha in _fechasGrid)
+                    {
+                        var semana = System.Globalization.ISOWeek.GetWeekOfYear(fecha.ToDateTime(TimeOnly.MinValue));
+                        if (semana != semanaActual && semanaActual != -1)
+                        {
+                            <tr class="table-secondary fw-semibold">
+                                <td colspan="3" class="text-end small">Total semana @semanaActual</td>
+                                <td>@totalSemana.ToString("F1") h</td>
+                                <td></td>
+                            </tr>
+                            totalSemana = 0;
+                        }
+                        semanaActual = semana;
+
+                        var turno = GetTurno(fecha);
+                        var esDomingo = fecha.DayOfWeek == DayOfWeek.Sunday;
+                        var horas = turno != null ? (turno.HoraFin.ToTimeSpan() - turno.HoraInicio.ToTimeSpan()).TotalHours - (turno.IncluyeAlmuerzo ? 0 : 1) : 0;
+                        if (!esDomingo) totalSemana += horas;
+
+                        <tr class="@(esDomingo ? "table-light text-muted" : "")">
+                            <td>@fecha.ToString("dd/MM/yy")</td>
+                            <td>@NombreDia(fecha.DayOfWeek)</td>
+                            <td>
+                                @if (esDomingo)
+                                {
+                                    <span class="text-muted small fst-italic">Descanso</span>
+                                }
+                                else if (turno != null)
+                                {
+                                    var esNuevo = _turnosEditados.Any(t => t.Fecha == fecha);
+                                    <span class="turno-cell @(esNuevo ? "bg-warning text-dark" : "")"
+                                          @onclick="() => AbrirEditor(fecha, turno)">
+                                        @(turno!.HoraInicio.ToString("HH:mm")) – @(turno.HoraFin.ToString("HH:mm"))
+                                    </span>
+                                }
+                                else
+                                {
+                                    <span class="turno-vacio" @onclick="() => AbrirEditor(fecha, null)">
+                                        + agregar turno
+                                    </span>
+                                }
+                            </td>
+                            <td>
+                                @if (!esDomingo && turno != null)
+                                { <span>@horas.ToString("F1") h</span> }
+                            </td>
+                            <td>
+                                @if (!esDomingo && turno != null)
+                                {
+                                    <button class="btn btn-outline-danger btn-sm" title="Eliminar"
+                                            @onclick="() => EliminarTurno(fecha)">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                }
+                            </td>
+                        </tr>
+                    }
+                    <!-- Total última semana -->
+                    <tr class="table-secondary fw-semibold">
+                        <td colspan="3" class="text-end small">Total semana @semanaActual</td>
+                        <td>@totalSemana.ToString("F1") h</td>
+                        <td></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+<!-- ===== MODAL EDITOR DE TURNO ===== -->
+@if (_editFecha.HasValue)
+{
+    <div class="modal-overlay" @onclick="()=>_editFecha=null">
+        <div class="modal-box" @onclick:stopPropagation>
+            <h5 class="mb-3">
+                <i class="bi bi-clock me-2 text-primary"></i>
+                Turno — @_editFecha.Value.ToString("dddd dd/MM/yyyy")
+            </h5>
+            <div class="row g-2 mb-3">
+                <div class="col-6">
+                    <label class="form-label small fw-semibold">Hora inicio</label>
+                    <input type="time" class="form-control"
+                           value="@_editInicioStr"
+                           @onchange="e => _editInicioStr = e.Value?.ToString() ?? _editInicioStr" />
+                </div>
+                <div class="col-6">
+                    <label class="form-label small fw-semibold">Hora fin</label>
+                    <input type="time" class="form-control"
+                           value="@_editFinStr"
+                           @onchange="e => _editFinStr = e.Value?.ToString() ?? _editFinStr" />
+                </div>
+                <div class="col-12">
+                    <div class="form-check mt-1">
+                        <input class="form-check-input" type="checkbox" id="chkAlmuerzo" @bind="_editIncluyeAlmuerzo" />
+                        <label class="form-check-label small" for="chkAlmuerzo">
+                            Almuerzo incluido en la jornada
+                        </label>
+                    </div>
+                </div>
+            </div>
+            @if (!string.IsNullOrEmpty(_errorEdit))
+            {
+                <div class="alert alert-danger py-1 small">@_errorEdit</div>
+            }
+            <div class="d-flex justify-content-end gap-2">
+                <button class="btn btn-outline-secondary" @onclick="()=>_editFecha=null">Cancelar</button>
+                <button class="btn btn-success" @onclick="ConfirmarEdit">Aplicar</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public Guid TecnicoId { get; set; }
+
+    private string  _tecnicoNombre = "...";
+    private string  _periodo       = "Semanal";
+    private string  _fechaInicioStr = DateOnly.FromDateTime(DateTime.Today).ToString("yyyy-MM-dd");
+    private bool    _cargando;
+    private bool    _guardando;
+    private string? _mensaje;
+    private string  _tipoMensaje = "success";
+
+    private List<DateOnly>          _fechasGrid     = [];
+    private List<TurnoHorarioDto>   _turnosGuardados = [];
+    private List<TurnoHorarioDto>   _turnosEditados  = [];
+
+    // Editor de turno
+    private DateOnly? _editFecha;
+    private string    _editInicioStr = "07:00";
+    private string    _editFinStr    = "14:00";
+    private bool      _editIncluyeAlmuerzo = true;
+    private string?   _errorEdit;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var tecnicos = await ProgramadorClient.GetTecnicosAsync();
+        _tecnicoNombre = tecnicos.FirstOrDefault(t => t.Id == TecnicoId)?.Nombre ?? "Técnico";
+        await Cargar();
+    }
+
+    private async Task Cargar()
+    {
+        _cargando = true;
+        if (!DateOnly.TryParse(_fechaInicioStr, out var fechaInicio))
+            fechaInicio = DateOnly.FromDateTime(DateTime.Today);
+
+        var hasta = _periodo switch
+        {
+            "Quincenal" => fechaInicio.AddDays(13),
+            "Mensual"   => fechaInicio.AddMonths(1).AddDays(-1),
+            _           => fechaInicio.AddDays(6)
+        };
+
+        _fechasGrid = [];
+        for (var d = fechaInicio; d <= hasta; d = d.AddDays(1))
+            _fechasGrid.Add(d);
+
+        _turnosGuardados = await ProgramadorClient.GetTurnosAsync(TecnicoId, fechaInicio, hasta);
+        _turnosEditados  = [];
+        _cargando = false;
+    }
+
+    private async Task Sugerir()
+    {
+        _cargando = true;
+        if (!DateOnly.TryParse(_fechaInicioStr, out var fechaInicio))
+            fechaInicio = DateOnly.FromDateTime(DateTime.Today);
+
+        var sugeridos = await ProgramadorClient.SugerirHorarioAsync(new SugerirHorarioRequest
+        {
+            TecnicoId   = TecnicoId,
+            FechaInicio = fechaInicio,
+            Periodo     = _periodo
+        });
+
+        _turnosEditados = sugeridos;
+        _cargando = false;
+        _mensaje = "Horario sugerido. Revise y ajuste si es necesario, luego presione Guardar.";
+        _tipoMensaje = "info";
+    }
+
+    private async Task Guardar()
+    {
+        _guardando = true;
+        var todos = MergeTurnos();
+        var result = await ProgramadorClient.GuardarTurnosAsync(new GuardarTurnosRequest
+        {
+            TecnicoId = TecnicoId,
+            Turnos    = todos
+        });
+        if (result.IsSuccess)
+        {
+            _mensaje = "Horario guardado correctamente.";
+            _tipoMensaje = "success";
+            await Cargar();
+        }
+        else
+        {
+            _mensaje = result.ErrorMessage ?? "Error al guardar.";
+            _tipoMensaje = "danger";
+        }
+        _guardando = false;
+    }
+
+    private void Descartar()
+    {
+        _turnosEditados = [];
+        _mensaje = null;
+    }
+
+    private void AbrirEditor(DateOnly fecha, TurnoHorarioDto? turnoExistente)
+    {
+        _editFecha           = fecha;
+        _editInicioStr       = (turnoExistente?.HoraInicio ?? new TimeOnly(7, 0)).ToString("HH:mm");
+        _editFinStr          = (turnoExistente?.HoraFin    ?? new TimeOnly(14, 0)).ToString("HH:mm");
+        _editIncluyeAlmuerzo = turnoExistente?.IncluyeAlmuerzo ?? true;
+        _errorEdit           = null;
+    }
+
+    private void ConfirmarEdit()
+    {
+        if (!TimeOnly.TryParse(_editInicioStr, out var ini) || !TimeOnly.TryParse(_editFinStr, out var fin))
+        { _errorEdit = "Formato de hora inválido."; return; }
+        if (fin <= ini) { _errorEdit = "La hora de fin debe ser posterior a la de inicio."; return; }
+        var totalH = (fin - ini).TotalHours;
+        if (totalH < 1) { _errorEdit = "El turno debe tener al menos 1 hora."; return; }
+
+        _turnosEditados.RemoveAll(t => t.Fecha == _editFecha!.Value);
+        _turnosEditados.Add(new TurnoHorarioDto
+        {
+            Id              = Guid.NewGuid(),
+            TecnicoId       = TecnicoId,
+            Fecha           = _editFecha!.Value,
+            HoraInicio      = ini,
+            HoraFin         = fin,
+            IncluyeAlmuerzo = _editIncluyeAlmuerzo,
+            HorasEfectivas  = _editIncluyeAlmuerzo ? totalH : totalH - 1
+        });
+        _editFecha = null;
+    }
+
+    private void EliminarTurno(DateOnly fecha)
+    {
+        _turnosEditados.RemoveAll(t => t.Fecha == fecha);
+        // marcamos para eliminar del guardado también al guardar
+        _turnosEditados.Add(new TurnoHorarioDto { TecnicoId = TecnicoId, Fecha = fecha, HoraInicio = TimeOnly.MinValue, HoraFin = TimeOnly.MinValue });
+    }
+
+    private TurnoHorarioDto? GetTurno(DateOnly fecha)
+    {
+        var editado = _turnosEditados.FirstOrDefault(t => t.Fecha == fecha);
+        if (editado != null)
+            return editado.HoraInicio == TimeOnly.MinValue ? null : editado;
+        return _turnosGuardados.FirstOrDefault(t => t.Fecha == fecha);
+    }
+
+    private List<TurnoHorarioDto> MergeTurnos()
+    {
+        var result = _turnosGuardados.ToList();
+        foreach (var e in _turnosEditados)
+        {
+            result.RemoveAll(t => t.Fecha == e.Fecha);
+            if (e.HoraInicio != TimeOnly.MinValue)
+                result.Add(e);
+        }
+        return result.Where(t => _fechasGrid.Contains(t.Fecha)).ToList();
+    }
+
+    private void Volver() => Nav.NavigateTo("/programador/tecnicos");
+
+    private static string NombreDia(DayOfWeek d) => d switch
+    {
+        DayOfWeek.Monday    => "Lun",
+        DayOfWeek.Tuesday   => "Mar",
+        DayOfWeek.Wednesday => "Mié",
+        DayOfWeek.Thursday  => "Jue",
+        DayOfWeek.Friday    => "Vie",
+        DayOfWeek.Saturday  => "Sáb",
+        DayOfWeek.Sunday    => "Dom",
+        _ => ""
+    };
+}

@@ -1,0 +1,105 @@
+﻿<div class="top-row ps-3 navbar navbar-dark">
+    <div class="container-fluid">
+        <a class="navbar-brand p-0 w-100" href="">
+            <img src="fixops-logo.png" alt="FixOps"
+                 style="width:100%;max-width:230px;height:auto;object-fit:contain;mix-blend-mode:screen;display:block;transform:scale(1.25);transform-origin:left center;" />
+        </a>
+        <button title="Navigation menu" class="navbar-toggler" @onclick="ToggleNavMenu">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+    </div>
+</div>
+
+<div class="@NavMenuCssClass nav-scrollable">
+    <nav class="nav flex-column">
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
+                <span class="bi bi-house-door-fill-nav-menu" aria-hidden="true"></span> Órdenes
+            </NavLink>
+        </div>
+        <AuthorizeView Roles="Administrador, Solicitante">
+            <div class="nav-item px-3">
+                <NavLink class="nav-link" href="registrar-orden">
+                    <span class="bi bi-plus-square-fill-nav-menu" aria-hidden="true"></span> Nueva Orden
+                </NavLink>
+            </div>
+        </AuthorizeView>
+        <AuthorizeView Roles="Administrador">
+            <Authorized>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="maestros">
+                        <span class="bi bi-list-ul-nav-menu" aria-hidden="true"></span> Maestros
+                    </NavLink>
+                </div>
+                <div class="nav-item px-3">
+                    <button class="nav-link btn btn-link text-start w-100 text-white text-decoration-none shadow-none d-flex align-items-center justify-content-between"
+                            @onclick="ToggleAnalitica">
+                        <span><span class="bi bi-bar-chart-fill-nav-menu" aria-hidden="true"></span> Analítica</span>
+                        <i class="bi @(_analiticaExpanded ? "bi-chevron-up" : "bi-chevron-down") small"></i>
+                    </button>
+                    @if (_analiticaExpanded)
+                    {
+                        <div class="sub-nav">
+                            <NavLink class="nav-link sub-nav-link" href="encuestas/resultados">
+                                <i class="bi bi-star-half sub-nav-icon"></i>Resultados Encuestas
+                            </NavLink>
+                            <NavLink class="nav-link sub-nav-link" href="metricas">
+                                <i class="bi bi-graph-up sub-nav-icon"></i>Métricas
+                            </NavLink>
+                        </div>
+                    }
+                </div>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="configuracion">
+                        <span class="bi bi-gear-fill-nav-menu" aria-hidden="true"></span> Configuración
+                    </NavLink>
+                </div>
+            </Authorized>
+        </AuthorizeView>
+        <AuthorizeView Roles="Programador">
+            <Authorized>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="programador">
+                        <span class="bi bi-people-fill-nav-menu" aria-hidden="true"></span> Mi Panel
+                    </NavLink>
+                </div>
+            </Authorized>
+        </AuthorizeView>
+
+        <AuthorizeView Roles="Tecnico">
+            <Authorized>
+                <div class="nav-item px-3">
+                    <NavLink class="nav-link" href="mi-horario">
+                        <span class="bi bi-calendar-week-nav-menu" aria-hidden="true"></span> Horario de Trabajo
+                    </NavLink>
+                </div>
+            </Authorized>
+        </AuthorizeView>
+
+        <div class="nav-item px-3 mt-4">
+            <button class="nav-link btn btn-link text-white text-decoration-none shadow-none" @onclick="Logout">
+                <span class="bi bi-door-closed-fill" aria-hidden="true"></span> Cerrar Sesión
+            </button>
+        </div>
+    </nav>
+</div>
+
+@code {
+    private bool collapseNavMenu = true;
+    private bool _analiticaExpanded = false;
+    private void ToggleAnalitica() => _analiticaExpanded = !_analiticaExpanded;
+    private string? NavMenuCssClass => collapseNavMenu ? "nav-hidden" : null;
+
+    private void ToggleNavMenu() => collapseNavMenu = !collapseNavMenu;
+
+    [Inject] private Blazored.LocalStorage.ILocalStorageService LocalStorage { get; set; } = default!;
+    [Inject] private CustomAuthenticationStateProvider AuthProvider { get; set; } = default!;
+    [Inject] private NavigationManager Navigation { get; set; } = default!;
+
+    private async Task Logout()
+    {
+        await LocalStorage.RemoveItemAsync("authToken");
+        AuthProvider.MarkUserAsLoggedOut();
+        Navigation.NavigateTo("login");
+    }
+}

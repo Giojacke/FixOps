@@ -1,0 +1,196 @@
+@page "/programador/tecnicos"
+@using Mantenimiento.Application.DTOs
+@using Mantenimiento.Domain.Enums
+@using Mantenimiento.Web.Services
+@inject ProgramadorClient ProgramadorClient
+@inject NavigationManager Nav
+@attribute [Authorize(Roles = "Programador")]
+
+<style>
+    .modal-overlay { position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.5);z-index:1050;display:flex;align-items:center;justify-content:center; }
+    .modal-box     { background:#fff;border-radius:8px;padding:24px;min-width:460px;max-width:680px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.3); }
+</style>
+
+<div class="container mt-4">
+    <h2><i class="bi bi-people-fill me-2 text-primary"></i>Mis Técnicos</h2>
+    <p class="text-muted">Técnicos bajo su supervisión y estado de sus órdenes activas.</p>
+
+    @if (_tecnicos == null)
+    {
+        <p><span class="spinner-border spinner-border-sm me-2"></span>Cargando...</p>
+    }
+    else if (!_tecnicos.Any())
+    {
+        <div class="alert alert-info">No tiene técnicos asignados aún. Pida a un Administrador que los vincule a su cuenta.</div>
+    }
+    else
+    {
+        <div class="row g-3">
+            @foreach (var tec in _tecnicos)
+            {
+                var ordenes = _ordenes.Where(o => o.TecnicoAsignadoId == tec.Id).ToList();
+                var activas = ordenes.Count(o => o.Estado != EstadoOrden.Finalizada && o.Estado != EstadoOrden.Cancelada);
+                var conMateriales = ordenes
+                    .SelectMany(o => o.Operaciones)
+                    .Where(op => op.Estado == EstadoOperacion.Pausa &&
+                                 op.MotivoPausa == MotivoPausa.NecesidadEquipos &&
+                                 (op.SolicitudesMateriales?.Any() ?? false))
+                    .ToList();
+
+                <div class="col-md-6 col-lg-4">
+                    <div class="card h-100 shadow-sm">
+                        <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                            <span class="fw-semibold">@tec.Nombre</span>
+                            <span class="badge bg-light text-dark">@tec.DependenciaNombre</span>
+                        </div>
+                        <div class="card-body">
+                            <div class="mb-2">
+                                <span class="me-3"><i class="bi bi-tools me-1"></i>@activas orden(es) activa(s)</span>
+                            </div>
+                            @if (conMateriales.Any())
+                            {
+                                <div class="alert alert-warning py-1 px-2 small mb-2">
+                                    <i class="bi bi-exclamation-triangle me-1"></i>
+                                    @conMateriales.Count operación(es) esperando materiales
+                                </div>
+                            }
+                        </div>
+                        <div class="card-footer d-flex gap-2">
+                            <button class="btn btn-sm btn-outline-primary flex-grow-1"
+                                    @onclick="() => VerMateriales(tec)">
+                                <i class="bi bi-box-seam me-1"></i>Materiales
+                            </button>
+                            <a href="/programador/horario/@tec.Id" class="btn btn-sm btn-outline-secondary flex-grow-1">
+                                <i class="bi bi-calendar-week me-1"></i>Horario
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(_mensaje))
+    {
+        <div class="alert alert-@_tipoMensaje mt-3 alert-dismissible">
+            @_mensaje <button class="btn-close" @onclick="()=>_mensaje=null"></button>
+        </div>
+    }
+</div>
+
+<!-- ===== MODAL MATERIALES ===== -->
+@if (_tecSeleccionado != null)
+{
+    <div class="modal-overlay" @onclick="()=>_tecSeleccionado=null">
+        <div class="modal-box" @onclick:stopPropagation>
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h5 class="mb-0"><i class="bi bi-box-seam me-2 text-warning"></i>Materiales — @_tecSeleccionado.Nombre</h5>
+                <button class="btn-close" @onclick="()=>_tecSeleccionado=null"></button>
+            </div>
+
+            @{
+                var opsPausa = _ordenes
+                    .Where(o => o.TecnicoAsignadoId == _tecSeleccionado.Id)
+                    .SelectMany(o => o.Operaciones.Select(op => (Orden: o, Op: op)))
+                    .Where(x => x.Op.Estado == EstadoOperacion.Pausa &&
+                                x.Op.MotivoPausa == MotivoPausa.NecesidadEquipos &&
+                                (x.Op.SolicitudesMateriales?.Any() ?? false))
+                    .ToList();
+            }
+
+            @if (!opsPausa.Any())
+            {
+                <p class="text-muted fst-italic">No hay operaciones en pausa por materiales.</p>
+            }
+            else
+            {
+                @foreach (var (orden, op) in opsPausa)
+                {
+                    <div class="card mb-3 border-warning">
+                        <div class="card-header bg-warning bg-opacity-25 d-flex justify-content-between">
+                            <span class="fw-semibold">@orden.Folio — Op. @op.Numero</span>
+                            <span class="text-muted small">@op.Descripcion</span>
+                        </div>
+                        <div class="card-body p-0">
+                            <table class="table table-sm mb-0">
+                                <thead class="table-light">
+                                    <tr><th>Material</th><th class="text-center">Cantidad</th><th class="text-center">Stock</th><th class="text-center">¿OK?</th></tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var sol in op.SolicitudesMateriales!)
+                                    {
+                                        var stockMat = _stockMateriales.GetValueOrDefault(sol.NombreMaterial, -1);
+                                        var hayStock = sol.EsPersonalizado || stockMat < 0 || stockMat >= sol.Cantidad;
+                                        <tr class="@(hayStock ? "" : "table-danger")">
+                                            <td>@sol.NombreMaterial @(sol.EsPersonalizado ? "(personalizado)" : "")</td>
+                                            <td class="text-center">@sol.Cantidad</td>
+                                            <td class="text-center">@(sol.EsPersonalizado ? "—" : (stockMat < 0 ? "?" : stockMat.ToString()))</td>
+                                            <td class="text-center">@(hayStock ? "✅" : "❌")</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="card-footer d-flex gap-2 align-items-center">
+                            <input class="form-control form-control-sm" placeholder="Mensaje adicional (opcional)"
+                                   @bind="_mensajeAdicional" />
+                            <button class="btn btn-success btn-sm text-nowrap" @onclick="() => Aprobar(orden, op)">
+                                <i class="bi bi-check2-circle me-1"></i>Aprobar y notificar
+                            </button>
+                        </div>
+                    </div>
+                }
+            }
+
+            <div class="d-flex justify-content-end mt-2">
+                <button class="btn btn-secondary" @onclick="()=>_tecSeleccionado=null">Cerrar</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<UsuarioDto>       _tecnicos = [];
+    private List<OrdenTrabajoDto>  _ordenes  = [];
+    private Dictionary<string,int> _stockMateriales = [];
+    private UsuarioDto? _tecSeleccionado;
+    private string      _mensajeAdicional = string.Empty;
+    private string?     _mensaje;
+    private string      _tipoMensaje = "success";
+
+    protected override async Task OnInitializedAsync()
+    {
+        _tecnicos = await ProgramadorClient.GetTecnicosAsync();
+        _ordenes  = await ProgramadorClient.GetOrdenesAsync();
+    }
+
+    private void VerMateriales(UsuarioDto tec)
+    {
+        _tecSeleccionado = tec;
+        _mensajeAdicional = string.Empty;
+        // Calcular stock a partir de las solicitudes (el stock real viene del catálogo)
+        _stockMateriales = [];
+    }
+
+    private async Task Aprobar(OrdenTrabajoDto orden, OperacionDto op)
+    {
+        var result = await ProgramadorClient.AprobarMaterialesAsync(new AprobacionMaterialRequest
+        {
+            OperacionId     = op.Id,
+            TecnicoId       = _tecSeleccionado!.Id,
+            MensajeAdicional = _mensajeAdicional
+        });
+
+        if (result.IsSuccess)
+        {
+            _mensaje = $"Materiales aprobados para {orden.Folio} Op.{op.Numero}. Técnico notificado.";
+            _tipoMensaje = "success";
+            _ordenes = await ProgramadorClient.GetOrdenesAsync();
+        }
+        else
+        {
+            _mensaje = result.ErrorMessage ?? "Error al aprobar.";
+            _tipoMensaje = "danger";
+        }
+    }
+}

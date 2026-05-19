@@ -1,0 +1,287 @@
+@page "/metricas"
+@using Mantenimiento.Application.DTOs
+@using Mantenimiento.Web.Services
+@using Microsoft.AspNetCore.Components.Authorization
+@inject MetricasClient MetricasClient
+@inject IJSRuntime JS
+@attribute [Authorize(Roles = "Administrador")]
+@implements IAsyncDisposable
+
+<PageTitle>Métricas — FixOps</PageTitle>
+
+<style>
+    .kpi-card      { border-radius: 12px; padding: 20px 24px; color: white; }
+    .kpi-value     { font-size: 2.2rem; font-weight: 700; line-height: 1; }
+    .kpi-label     { font-size: .85rem; opacity: .85; margin-top: 4px; }
+    .chart-card    { border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,.07); padding: 20px; background: white; }
+    .chart-title   { font-weight: 600; font-size: .95rem; color: #495057; margin-bottom: 16px; }
+    .filter-bar    { background: white; border-radius: 10px; padding: 14px 20px; box-shadow: 0 1px 6px rgba(0,0,0,.07); }
+</style>
+
+<div class="container-fluid mt-4">
+    <div class="d-flex align-items-center justify-content-between mb-4">
+        <h2 class="mb-0 fw-bold">Métricas Operativas</h2>
+        @if (_cargando) { <span class="spinner-border spinner-border-sm text-primary"></span> }
+    </div>
+
+    <!-- ── Filtros ───────────────────────────────────────────────── -->
+    <div class="filter-bar mb-4 d-flex flex-wrap gap-3 align-items-end">
+        <div>
+            <label class="form-label mb-1 small fw-semibold">Regional</label>
+            <select class="form-select form-select-sm" style="min-width:160px" @bind="_filtroRegional">
+                <option value="">Todas las regionales</option>
+                @foreach (var r in _regionales)
+                { <option value="@r">@r</option> }
+            </select>
+        </div>
+        <div>
+            <label class="form-label mb-1 small fw-semibold">Período</label>
+            <select class="form-select form-select-sm" style="min-width:140px" @bind="_filtroPeriodo">
+                <option value="1">Último mes</option>
+                <option value="3">Últimos 3 meses</option>
+                <option value="6" selected>Últimos 6 meses</option>
+                <option value="12">Último año</option>
+                <option value="0">Personalizado</option>
+            </select>
+        </div>
+        @if (_filtroPeriodo == "0")
+        {
+            <div>
+                <label class="form-label mb-1 small fw-semibold">Desde</label>
+                <input type="date" class="form-control form-control-sm" @bind="_filtroDesde" />
+            </div>
+            <div>
+                <label class="form-label mb-1 small fw-semibold">Hasta</label>
+                <input type="date" class="form-control form-control-sm" @bind="_filtroHasta" />
+            </div>
+        }
+        <button class="btn btn-primary btn-sm" @onclick="Aplicar">
+            <i class="bi bi-funnel me-1"></i>Aplicar
+        </button>
+    </div>
+
+    @if (_datos != null)
+    {
+        <!-- ── KPIs ──────────────────────────────────────────────── -->
+        <div class="row g-3 mb-4">
+            <div class="col-6 col-md-3">
+                <div class="kpi-card" style="background:linear-gradient(135deg,#6f42c1,#9561e2)">
+                    <div class="kpi-value">@_datos.Kpis.TotalOrdenes</div>
+                    <div class="kpi-label">Total órdenes</div>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="kpi-card" style="background:linear-gradient(135deg,#0d6efd,#3d8bfd)">
+                    <div class="kpi-value">@_datos.Kpis.TiempoPromedioHoras<span style="font-size:1.1rem">h</span></div>
+                    <div class="kpi-label">Tiempo promedio resolución</div>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="kpi-card" style="background:linear-gradient(135deg,#198754,#20c997)">
+                    <div class="kpi-value">@_datos.Kpis.Finalizadas</div>
+                    <div class="kpi-label">Finalizadas</div>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="kpi-card" style="background:linear-gradient(135deg,#fd7e14,#ffc107)">
+                    <div class="kpi-value">@(_datos.Kpis.Pendientes + _datos.Kpis.EnProceso)</div>
+                    <div class="kpi-label">Pendientes + En Proceso</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── Fila 1: Estado + Regional ─────────────────────────── -->
+        <div class="row g-3 mb-3">
+            <div class="col-md-4">
+                <div class="chart-card h-100">
+                    <div class="chart-title"><i class="bi bi-pie-chart me-2 text-primary"></i>Distribución por Estado</div>
+                    <div style="position:relative;height:260px">
+                        <canvas id="chartEstado"></canvas>
+                    </div>
+                    <div class="mt-3 d-flex flex-wrap gap-2 justify-content-center">
+                        <span class="badge" style="background:#6f42c1">Pendiente: @_datos.Kpis.Pendientes</span>
+                        <span class="badge" style="background:#0d6efd">En Proceso: @_datos.Kpis.EnProceso</span>
+                        <span class="badge" style="background:#198754">Finalizada: @_datos.Kpis.Finalizadas</span>
+                        <span class="badge" style="background:#dc3545">Cancelada: @_datos.Kpis.Canceladas</span>
+                        <span class="badge" style="background:#fd7e14">Ops en Pausa: @_datos.Kpis.OperacionesEnPausa</span>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-8">
+                <div class="chart-card h-100">
+                    <div class="chart-title"><i class="bi bi-bar-chart me-2 text-primary"></i>Órdenes por Regional</div>
+                    <div style="position:relative;height:280px">
+                        <canvas id="chartRegional"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── Fila 2: Tiempo por Regional + Tendencia ────────────── -->
+        <div class="row g-3 mb-4">
+            <div class="col-md-5">
+                <div class="chart-card h-100">
+                    <div class="chart-title"><i class="bi bi-clock-history me-2 text-warning"></i>Tiempo Promedio de Resolución (horas)</div>
+                    <div style="position:relative;height:280px">
+                        <canvas id="chartTiempo"></canvas>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-7">
+                <div class="chart-card h-100">
+                    <div class="chart-title"><i class="bi bi-graph-up me-2 text-success"></i>Tendencia Mensual</div>
+                    <div style="position:relative;height:280px">
+                        <canvas id="chartTendencia"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private DashboardDto? _datos;
+    private bool         _cargando;
+    private List<string> _regionales = [];
+
+    private string    _filtroRegional = "";
+    private string    _filtroPeriodo  = "6";
+    private DateTime  _filtroDesde    = DateTime.Today.AddMonths(-6);
+    private DateTime  _filtroHasta    = DateTime.Today;
+
+    protected override async Task OnInitializedAsync() => await Cargar();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_datos != null)
+            await RenderizarGraficos();
+    }
+
+    private async Task Aplicar()
+    {
+        await Cargar();
+    }
+
+    private async Task Cargar()
+    {
+        _cargando = true;
+        StateHasChanged();
+
+        DateTime desde, hasta;
+        if (_filtroPeriodo == "0")
+        {
+            desde = _filtroDesde;
+            hasta = _filtroHasta;
+        }
+        else
+        {
+            var meses = int.Parse(_filtroPeriodo);
+            desde = DateTime.Today.AddMonths(-meses);
+            hasta = DateTime.Today;
+        }
+
+        _datos = await MetricasClient.GetMetricasAsync(
+            string.IsNullOrEmpty(_filtroRegional) ? null : _filtroRegional,
+            desde, hasta);
+
+        if (_datos != null)
+            _regionales = _datos.Regionales;
+
+        _cargando = false;
+    }
+
+    private async Task RenderizarGraficos()
+    {
+        if (_datos == null) return;
+
+        // ── Donut: Distribución por Estado ──────────────────────
+        await JS.InvokeVoidAsync("renderChart", "chartEstado", new
+        {
+            type = "doughnut",
+            data = new
+            {
+                labels = _datos.OrdenesPorEstado.Select(e => e.Estado).ToArray(),
+                datasets = new[] { new {
+                    data            = _datos.OrdenesPorEstado.Select(e => e.Cantidad).ToArray(),
+                    backgroundColor = new[] { "#6f42c1","#0d6efd","#198754","#dc3545" },
+                    borderWidth     = 2,
+                    borderColor     = "#fff"
+                }}
+            },
+            options = new { responsive = true, maintainAspectRatio = false,
+                plugins = new { legend = new { position = "bottom" } } }
+        });
+
+        // ── Barras: Órdenes por Regional ─────────────────────────
+        await JS.InvokeVoidAsync("renderChart", "chartRegional", new
+        {
+            type = "bar",
+            data = new
+            {
+                labels = _datos.MetricasPorRegional.Select(r => r.Regional).ToArray(),
+                datasets = new[] { new {
+                    label           = "Órdenes",
+                    data            = _datos.MetricasPorRegional.Select(r => r.CantidadOrdenes).ToArray(),
+                    backgroundColor = "#6f42c1",
+                    borderRadius    = 6
+                }}
+            },
+            options = new { responsive = true, maintainAspectRatio = false,
+                plugins = new { legend = new { display = false } },
+                scales  = new { y = new { beginAtZero = true, ticks = new { stepSize = 1 } } } }
+        });
+
+        // ── Barras Horizontales: Tiempo promedio por Regional ────
+        await JS.InvokeVoidAsync("renderChart", "chartTiempo", new
+        {
+            type = "bar",
+            data = new
+            {
+                labels = _datos.MetricasPorRegional.Select(r => r.Regional).ToArray(),
+                datasets = new[] { new {
+                    label           = "Horas promedio",
+                    data            = _datos.MetricasPorRegional.Select(r => r.PromedioHoras).ToArray(),
+                    backgroundColor = "#fd7e14",
+                    borderRadius    = 6
+                }}
+            },
+            options = new { indexAxis = "y", responsive = true, maintainAspectRatio = false,
+                plugins = new { legend = new { display = false } },
+                scales  = new { x = new { beginAtZero = true } } }
+        });
+
+        // ── Línea: Tendencia mensual ──────────────────────────────
+        await JS.InvokeVoidAsync("renderChart", "chartTendencia", new
+        {
+            type = "line",
+            data = new
+            {
+                labels = _datos.Tendencia.Select(t => t.Periodo).ToArray(),
+                datasets = new object[]
+                {
+                    new {
+                        label       = "Creadas",
+                        data        = _datos.Tendencia.Select(t => t.Creadas).ToArray(),
+                        borderColor = "#0d6efd", backgroundColor = "rgba(13,110,253,.1)",
+                        fill = true, tension = 0.3, pointRadius = 4
+                    },
+                    new {
+                        label       = "Finalizadas",
+                        data        = _datos.Tendencia.Select(t => t.Finalizadas).ToArray(),
+                        borderColor = "#198754", backgroundColor = "rgba(25,135,84,.1)",
+                        fill = true, tension = 0.3, pointRadius = 4
+                    }
+                }
+            },
+            options = new { responsive = true, maintainAspectRatio = false,
+                plugins = new { legend = new { position = "top" } },
+                scales  = new { y = new { beginAtZero = true, ticks = new { stepSize = 1 } } } }
+        });
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        foreach (var id in new[] { "chartEstado","chartRegional","chartTiempo","chartTendencia" })
+            await JS.InvokeVoidAsync("destroyChart", id);
+    }
+}

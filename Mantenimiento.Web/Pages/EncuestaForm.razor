@@ -1,0 +1,211 @@
+@page "/encuesta/{OrdenId:guid}"
+@using Mantenimiento.Application.DTOs
+@using Mantenimiento.Web.Services
+@using Mantenimiento.Web.Shared
+@inject EncuestaClient EncuestaClient
+@inject OrdenTrabajoClient OrdenTrabajoClient
+@inject NavigationManager NavigationManager
+
+<div class="container py-5">
+    <div class="row justify-content-center text-center mb-4">
+        <div class="col-lg-8">
+            <h1 class="display-3 fw-bold text-primary">ENCUESTA DE SATISFACCIÓN</h1>
+            <p class="lead text-muted">Módulo de Evaluación de Servicio</p>
+        </div>
+    </div>
+
+    @if (_loading)
+    {
+        <div class="text-center py-5">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Cargando...</span>
+            </div>
+            <p class="mt-2 text-muted">Cargando información de la orden...</p>
+        </div>
+    }
+    else if (_orden == null)
+    {
+        <div class="alert alert-warning text-center shadow-sm rounded-4 p-4 border-0">
+            <i class="bi bi-exclamation-triangle display-4 d-block mb-3"></i>
+            <h4 class="fw-bold">Orden no encontrada</h4>
+            <p class="mb-0">No pudimos recuperar la información de la orden con ID: @OrdenId</p>
+            <a href="/" class="btn btn-outline-warning mt-3 rounded-pill">Volver al inicio</a>
+        </div>
+    }
+    else
+    {
+        <div class="row justify-content-center">
+            <div class="col-lg-8">
+                <!-- Resumen de la Orden -->
+                <div class="card border-0 shadow-sm rounded-4 mb-4 bg-light">
+                    <div class="card-body p-4">
+                        <div class="d-flex align-items-center mb-3">
+                            <i class="bi bi-info-circle-fill text-primary fs-4 me-2"></i>
+                            <h5 class="mb-0 fw-bold text-dark">Detalles del Trabajo Realizado</h5>
+                        </div>
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <small class="text-uppercase text-muted fw-bold">Folio</small>
+                                <p class="mb-0 fw-semibold text-primary">#@_orden.Folio</p>
+                            </div>
+                            <div class="col-md-6">
+                                <small class="text-uppercase text-muted fw-bold">Dependencia</small>
+                                <p class="mb-0 fw-semibold">@_orden.DependenciaNombre</p>
+                            </div>
+                            <div class="col-12 mt-3">
+                                <small class="text-uppercase text-muted fw-bold">Descripción Original</small>
+                                <p class="mb-0 text-dark">@_orden.Descripcion</p>
+                            </div>
+                        </div>
+
+                        <hr class="my-4 op-10">
+
+                        <h6 class="fw-bold text-secondary mb-3">Operaciones Ejecutadas:</h6>
+                        <ul class="list-group list-group-flush bg-transparent">
+                            @foreach (var op in _orden.Operaciones)
+                            {
+                                <li class="list-group-item bg-transparent border-0 ps-0 d-flex justify-content-between align-items-start">
+                                    <div class="ms-2 me-auto">
+                                        <div class="fw-semibold text-dark">@op.Descripcion</div>
+                                        <small class="text-muted">Finalizada el @op.FechaRealizacion.ToLocalTime().ToString("g")</small>
+                                    </div>
+                                    <span class="badge bg-info rounded-pill">@op.HorasHombre h</span>
+                                </li>
+                            }
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Formulario de Calificación -->
+                <div class="card border-0 shadow-lg rounded-4 overflow-hidden">
+                    <div class="card-header bg-gradient bg-primary p-4 border-0">
+                        <h4 class="text-white mb-0 fw-bold">Calificación del Servicio</h4>
+                        <p class="text-white-50 mb-0">Tus respuestas son anónimas y nos ayudan a mejorar.</p>
+                    </div>
+                    <div class="card-body p-4 p-md-5 bg-white">
+                        <!-- Campos de Estrellas -->
+                        <div class="row row-cols-1 row-cols-md-3 g-4 mb-5 text-center">
+                            <div class="col">
+                                <label class="form-label text-secondary fw-semibold mb-3 d-block">Atención</label>
+                                <StarRating @bind-Value="_request.PuntajeAtencion" />
+                            </div>
+                            <div class="col">
+                                <label class="form-label text-secondary fw-semibold mb-3 d-block">Servicio</label>
+                                <StarRating @bind-Value="_request.PuntajeServicio" />
+                            </div>
+                            <div class="col">
+                                <label class="form-label text-secondary fw-semibold mb-3 d-block">Tiempo</label>
+                                <StarRating @bind-Value="_request.PuntajeTiempo" />
+                            </div>
+                        </div>
+
+                        <div class="mb-5">
+                            <label class="form-label text-secondary fw-semibold mb-2">
+                                <i class="bi bi-chat-left-text me-2"></i>¿Algo más que desees comentarnos?
+                            </label>
+                            <textarea @bind="_request.Comentarios" 
+                                      class="form-control bg-light border-0 rounded-3 p-3 shadow-none focus-primary" 
+                                      rows="4" 
+                                      placeholder="Opcional..."></textarea>
+                        </div>
+
+                        <div class="d-flex gap-2">
+                            <button class="btn btn-primary btn-lg flex-grow-1 rounded-pill py-3 fw-bold shadow-sm" 
+                                    @onclick="HandleSubmit" 
+                                    disabled="@_isSubmitting">
+                                @if (_isSubmitting)
+                                {
+                                    <span class="spinner-border spinner-border-sm me-2"></span>
+                                    <span>Guardando...</span>
+                                }
+                                else
+                                {
+                                    <span>Enviar Mi Opinión</span>
+                                }
+                            </button>
+                            <a href="/" class="btn btn-outline-secondary btn-lg rounded-pill py-3 px-4 shadow-sm fw-bold">
+                                Omitir
+                            </a>
+                        </div>
+
+                        @if (!string.IsNullOrEmpty(_message))
+                        {
+                            <div class="alert alert-info mt-4 border-0 rounded-4 shadow-sm" role="alert">
+                                <i class="bi bi-info-circle me-2"></i>@_message
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+<style>
+    body { font-family: 'Inter', sans-serif; background-color: #f0f2f5; }
+    .bg-gradient-primary { background: linear-gradient(135deg, #0d6efd 0%, #0045bc 100%); }
+    .focus-primary:focus { border: 1px solid #0d6efd !important; background: white !important; }
+    .btn-primary { background: linear-gradient(135deg, #0d6efd 0%, #0045bc 100%); border: none; }
+    .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(13, 110, 253, 0.3); }
+    .op-10 { opacity: 0.1; }
+</style>
+
+@code {
+    [Parameter] public Guid OrdenId { get; set; }
+    private OrdenTrabajoDto? _orden;
+    private CrearEncuestaRequest _request = new();
+    private bool _loading = true;
+    private bool _isSubmitting = false;
+    private string? _message;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (OrdenId == Guid.Empty)
+        {
+            _loading = false;
+            return;
+        }
+
+        try
+        {
+            var result = await OrdenTrabajoClient.GetOrdenByIdAsync(OrdenId);
+            if (result.IsSuccess)
+            {
+                _orden = result.Value;
+                _request.OrdenTrabajoId = OrdenId;
+                _request.PuntajeAtencion = 5;
+                _request.PuntajeServicio = 5;
+                _request.PuntajeTiempo = 5;
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error loading order: {ex.Message}");
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task HandleSubmit()
+    {
+        _isSubmitting = true;
+        _message = null;
+        try
+        {
+            await EncuestaClient.RegistrarAsync(_request);
+            _message = "¡Muchas gracias! Tu opinión ha sido registrada con éxito.";
+            await Task.Delay(2000);
+            NavigationManager.NavigateTo("/");
+        }
+        catch (Exception ex)
+        {
+            _message = $"Error: {ex.Message}";
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+}

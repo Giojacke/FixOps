@@ -1,0 +1,81 @@
+@page "/login"
+@layout LoginLayout
+@inject UsuarioClient UsuarioClient
+@inject Blazored.LocalStorage.ILocalStorageService LocalStorage
+@inject CustomAuthenticationStateProvider AuthProvider
+@inject NavigationManager Navigation
+
+<div class="container mt-5">
+    <div class="row justify-content-center">
+        <div class="col-md-4">
+            <div class="card shadow">
+                <div class="card-header bg-primary text-white text-center">
+                    <h3>Iniciar Sesión</h3>
+                </div>
+                <div class="card-body">
+                    @if (!string.IsNullOrEmpty(errorMessage))
+                    {
+                        <div class="alert alert-danger">@errorMessage</div>
+                    }
+                    <EditForm Model="loginRequest" OnValidSubmit="HandleLogin">
+                        <DataAnnotationsValidator />
+                        <div class="mb-3">
+                            <label class="form-label">Email</label>
+                            <InputText @bind-Value="loginRequest.Email" class="form-control" placeholder="admin@mantenimiento.com" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Contraseña</label>
+                            <InputText @bind-Value="loginRequest.Password" type="password" class="form-control" placeholder="Admin123!" />
+                        </div>
+                        <button type="submit" class="btn btn-primary w-100" disabled="@loading">
+                            @if (loading)
+                            {
+                                <span class="spinner-border spinner-border-sm"></span> @(" ")
+                            }
+                            Ingresar
+                        </button>
+                    </EditForm>
+                </div>
+            </div>
+            <div class="mt-3 text-center text-muted">
+                <small>Credenciales de prueba: <b>admin@mantenimiento.com</b> / <b>Admin123!</b></small>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private LoginRequest loginRequest = new();
+    private string errorMessage = string.Empty;
+    private bool loading = false;
+
+    private async Task HandleLogin()
+    {
+        loading = true;
+        errorMessage = string.Empty;
+
+        try
+        {
+            var result = await UsuarioClient.LoginAsync(loginRequest);
+
+            if (result != null && !string.IsNullOrEmpty(result.Token))
+            {
+                await LocalStorage.SetItemAsync("authToken", result.Token);
+                AuthProvider.MarkUserAsAuthenticated(result.Token);
+                Navigation.NavigateTo("/");
+            }
+            else
+            {
+                errorMessage = "Email o contraseña incorrectos.";
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = "Error al intentar iniciar sesión: " + ex.Message;
+        }
+        finally
+        {
+            loading = false;
+        }
+    }
+}

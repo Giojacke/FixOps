@@ -1,0 +1,250 @@
+@page "/registrar-orden"
+@using Mantenimiento.Application.DTOs
+@using Mantenimiento.Domain.Enums
+@using Mantenimiento.Web.Services
+@inject OrdenTrabajoClient OrdenTrabajoClient
+@inject DependenciaClient DependenciaClient
+@inject UsuarioClient UsuarioClient
+@inject NavigationManager NavigationManager
+@inject AuthenticationStateProvider AuthStateProvider
+@using System.Security.Claims
+@attribute [Authorize(Roles = "Administrador, Solicitante")]
+
+@code {
+    private static readonly int[] NumerosOperacion = [10, 20, 30, 40, 50, 60, 70, 80];
+}
+
+<div class="container mt-4">
+    <div class="card shadow-sm">
+        <div class="card-header bg-primary text-white">
+            <h3 class="mb-0">Registrar Nueva Orden de Trabajo</h3>
+        </div>
+        <div class="card-body">
+            <EditForm Model="@_request" OnValidSubmit="HandleSubmit">
+                <DataAnnotationsValidator />
+                <ValidationSummary />
+
+                <!-- Datos de la orden -->
+                <h6 class="text-muted fw-semibold mb-3 border-bottom pb-1">Datos de la Orden</h6>
+
+                <div class="mb-3">
+                    <label class="form-label">Descripción del problema *</label>
+                    <InputTextArea @bind-Value="_request.Descripcion" class="form-control" rows="3" placeholder="Detalle el problema o trabajo requerido..." />
+                </div>
+
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <label class="form-label">Dependencia *</label>
+                        <select class="form-select" @onchange="OnDependenciaChanged">
+                            <option value="">-- Seleccione Dependencia --</option>
+                            @foreach (var dep in _dependencias)
+                            {
+                                <option value="@dep.Id" selected="@(dep.Id == _request.IdDependencia)">@dep.Nombre</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">
+                            Contacto Solicitante
+                            @if (_esSolicitante)
+                            { <span class="text-muted small">(tú)</span> }
+                        </label>
+                        @if (_esSolicitante)
+                        {
+                            var yo = _usuarios.FirstOrDefault(u => u.Id == _request.IdSolicitante);
+                            <input class="form-control" disabled value="@(yo?.Nombre ?? "—")" />
+                        }
+                        else if (_depContacto != null)
+                        {
+                            <div class="input-group">
+                                <span class="input-group-text"><i class="bi bi-person"></i></span>
+                                <input class="form-control" disabled value="@ContactoDisplay" />
+                            </div>
+                            @if (!string.IsNullOrWhiteSpace(_depContacto.NombreContacto) && !string.IsNullOrWhiteSpace(_depContacto.JefeEmail))
+                            {
+                                <small class="text-muted"><i class="bi bi-envelope me-1"></i>@_depContacto.JefeEmail</small>
+                            }
+                        }
+                        else
+                        {
+                            <input class="form-control" disabled placeholder="Seleccione una dependencia primero" />
+                        }
+                    </div>
+                </div>
+
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <label class="form-label">Técnico Asignado</label>
+                        <InputSelect @bind-Value="_request.IdTecnicoAsignado" class="form-select">
+                            <option value="">-- Sin asignar --</option>
+                            @foreach (var tec in _tecnicos)
+                            {
+                                <option value="@tec.Id">@tec.Nombre</option>
+                            }
+                        </InputSelect>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Urgencia</label>
+                        <InputSelect @bind-Value="_request.Urgencia" class="form-select">
+                            @foreach (var urgencia in Enum.GetValues<NivelUrgencia>())
+                            {
+                                <option value="@urgencia">@urgencia</option>
+                            }
+                        </InputSelect>
+                    </div>
+                </div>
+
+                <!-- Primera operación -->
+                <h6 class="text-muted fw-semibold mb-3 border-bottom pb-1 mt-4">Primera Operación</h6>
+
+                <div class="row g-3 mb-4">
+                    <div class="col-md-3">
+                        <label class="form-label">N° de Operación *</label>
+                        <select class="form-select" @bind="_primeraOpNumero">
+                            <option value="0">-- Seleccione --</option>
+                            @foreach (var n in NumerosOperacion)
+                            {
+                                <option value="@n">@n</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="col-md-9">
+                        <label class="form-label">Función a realizar *</label>
+                        <textarea class="form-control" rows="2" placeholder="Describa la función que se debe ejecutar..."
+                                  @bind="_primeraOpDescripcion"></textarea>
+                    </div>
+                </div>
+
+                <div class="d-flex gap-2">
+                    <button type="submit" class="btn btn-success" disabled="@_isSubmitting">
+                        @if (_isSubmitting)
+                        {
+                            <span class="spinner-border spinner-border-sm" role="status"></span>
+                            <span> Procesando...</span>
+                        }
+                        else { <span><i class="bi bi-save me-1"></i>Guardar Orden</span> }
+                    </button>
+                    <a href="/" class="btn btn-outline-secondary">Cancelar</a>
+                </div>
+            </EditForm>
+
+            @if (!string.IsNullOrEmpty(_errorMessage))
+            {
+                <div class="alert alert-danger mt-3">@_errorMessage</div>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private CrearOrdenRequest _request = new() { Urgencia = NivelUrgencia.Media };
+    private List<DependenciaDto> _dependencias  = [];
+    private List<UsuarioDto>     _usuarios      = [];
+    private List<UsuarioDto>     _tecnicos      = [];
+    private DependenciaDto?      _depContacto;
+    private bool   _isSubmitting;
+    private string? _errorMessage;
+
+    // Primera operación
+    private int    _primeraOpNumero      = 10;
+    private string _primeraOpDescripcion = string.Empty;
+    private int    _primeraOpHoras       = 1;
+
+    private bool _esSolicitante;
+
+    private string ContactoDisplay => _depContacto == null ? string.Empty
+        : !string.IsNullOrWhiteSpace(_depContacto.NombreContacto) ? _depContacto.NombreContacto
+        : !string.IsNullOrWhiteSpace(_depContacto.JefeEmail)      ? _depContacto.JefeEmail
+        : "Sin contacto registrado";
+
+    protected override async Task OnInitializedAsync()
+    {
+        _dependencias = (await DependenciaClient.GetAllAsync()).ToList();
+        _tecnicos     = (await UsuarioClient.GetAllTecnicosAsync()).ToList();
+
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user      = authState.User;
+        _esSolicitante = user.IsInRole("Solicitante");
+
+        var userIdStr = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (Guid.TryParse(userIdStr, out var userId))
+        {
+            _request.IdSolicitante = userId;
+
+            if (_esSolicitante)
+            {
+                // Para Solicitante: cargar solo su propio registro para el display
+                _usuarios = (await UsuarioClient.GetAllAsync()).ToList();
+            }
+        }
+    }
+
+    private void OnDependenciaChanged(ChangeEventArgs e)
+    {
+        if (Guid.TryParse(e.Value?.ToString(), out var depId))
+        {
+            _request.IdDependencia = depId;
+            _depContacto = _dependencias.FirstOrDefault(d => d.Id == depId);
+        }
+        else
+        {
+            _request.IdDependencia = Guid.Empty;
+            _depContacto = null;
+        }
+    }
+
+    private async Task HandleSubmit()
+    {
+        if (_request.IdDependencia == Guid.Empty)
+        {
+            _errorMessage = "Debe seleccionar una dependencia.";
+            return;
+        }
+        if (_request.IdSolicitante == Guid.Empty)
+        {
+            _errorMessage = "No se pudo determinar el solicitante. Verifique que su sesión esté activa.";
+            return;
+        }
+        if (_primeraOpNumero == 0)
+        {
+            _errorMessage = "Debe seleccionar un número de operación para la primera operación.";
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(_primeraOpDescripcion))
+        {
+            _errorMessage = "Debe ingresar la función a realizar en la primera operación.";
+            return;
+        }
+
+        _isSubmitting = true;
+        _errorMessage = null;
+
+        // 1. Crear la orden
+        var resultado = await OrdenTrabajoClient.RegistrarOrdenAsync(_request);
+        if (!resultado.IsSuccess)
+        {
+            _errorMessage = resultado.ErrorMessage;
+            _isSubmitting = false;
+            return;
+        }
+
+        // 2. Agregar la primera operación automáticamente
+        var ordenId = resultado.Value!.Id;
+        var opRequest = new AgregarOperacionRequest
+        {
+            Numero       = _primeraOpNumero,
+            Descripcion  = _primeraOpDescripcion,
+            HorasHombre  = 1
+        };
+        var opResultado = await OrdenTrabajoClient.AgregarOperacionAsync(ordenId, opRequest);
+        if (!opResultado.IsSuccess)
+        {
+            // La orden se creó, pero la operación falló — redirigimos igual
+            _errorMessage = $"Orden creada, pero la operación no se pudo guardar: {opResultado.ErrorMessage}";
+            _isSubmitting = false;
+            return;
+        }
+
+        NavigationManager.NavigateTo("/");
+    }
+}

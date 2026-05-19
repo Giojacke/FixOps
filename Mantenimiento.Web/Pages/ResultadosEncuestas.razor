@@ -1,0 +1,179 @@
+@page "/encuestas/resultados"
+@using Mantenimiento.Application.DTOs
+@using Mantenimiento.Web.Services
+@inject EncuestaClient EncuestaClient
+@attribute [Authorize(Roles = "Administrador")]
+
+<PageTitle>Resultados de Encuestas</PageTitle>
+
+<div class="container mt-4">
+    <h1>Resultados de Satisfacción</h1>
+
+    <!-- Filtro por fechas -->
+    <div class="card mb-4">
+        <div class="card-body">
+            <div class="row align-items-end g-3">
+                <div class="col-md-3">
+                    <label class="form-label fw-semibold">Desde</label>
+                    <input type="date" class="form-control" @bind="_desde" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label fw-semibold">Hasta</label>
+                    <input type="date" class="form-control" @bind="_hasta" />
+                </div>
+                <div class="col-md-3">
+                    <button class="btn btn-primary" @onclick="Filtrar">Filtrar</button>
+                    <button class="btn btn-outline-secondary ms-2" @onclick="LimpiarFiltro">Limpiar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(_errorMessage))
+    {
+        <div class="alert alert-danger">@_errorMessage</div>
+    }
+
+    <!-- Métricas por técnico y dependencia -->
+    @if (_metricas != null)
+    {
+        <div class="row mb-4">
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-header bg-dark text-white"><h6 class="mb-0">Promedio por Técnico</h6></div>
+                    <div class="card-body p-0">
+                        <table class="table table-sm mb-0">
+                            <thead class="table-light"><tr><th>Técnico</th><th>Promedio</th><th>Encuestas</th></tr></thead>
+                            <tbody>
+                                @foreach (var m in _metricas.PorTecnico)
+                                {
+                                    <tr>
+                                        <td>@m.NombreTecnico</td>
+                                        <td><strong>@m.Promedio.ToString("F2") ⭐</strong></td>
+                                        <td>@m.TotalEncuestas</td>
+                                    </tr>
+                                }
+                                @if (!_metricas.PorTecnico.Any())
+                                {
+                                    <tr><td colspan="3" class="text-center text-muted">Sin datos</td></tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-header bg-dark text-white"><h6 class="mb-0">Promedio por Dependencia</h6></div>
+                    <div class="card-body p-0">
+                        <table class="table table-sm mb-0">
+                            <thead class="table-light"><tr><th>Dependencia</th><th>Promedio</th><th>Encuestas</th></tr></thead>
+                            <tbody>
+                                @foreach (var m in _metricas.PorDependencia)
+                                {
+                                    <tr>
+                                        <td>@m.Dependencia</td>
+                                        <td><strong>@m.Promedio.ToString("F2") ⭐</strong></td>
+                                        <td>@m.TotalEncuestas</td>
+                                    </tr>
+                                }
+                                @if (!_metricas.PorDependencia.Any())
+                                {
+                                    <tr><td colspan="3" class="text-center text-muted">Sin datos</td></tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+
+    <!-- Tabla detalle -->
+    @if (_resultados == null)
+    {
+        <p>Cargando resultados...</p>
+    }
+    else if (!_resultados.Any())
+    {
+        <p class="alert alert-info">No hay encuestas registradas para el período seleccionado.</p>
+    }
+    else
+    {
+        <h5>Detalle de Encuestas (@_resultados.Count())</h5>
+        <div class="table-responsive">
+            <table class="table table-striped table-hover mt-2">
+                <thead class="table-dark">
+                    <tr>
+                        <th>Departamento</th>
+                        <th>Folio Orden</th>
+                        <th>Atención</th>
+                        <th>Servicio</th>
+                        <th>Tiempo</th>
+                        <th>Promedio</th>
+                        <th>Fecha</th>
+                        <th>Comentarios</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var res in _resultados)
+                    {
+                        var promedio = (res.PuntajeAtencion + res.PuntajeServicio + res.PuntajeTiempo) / 3.0;
+                        <tr>
+                            <td>@res.Departamento</td>
+                            <td>@res.FolioOrden</td>
+                            <td>@res.PuntajeAtencion ⭐</td>
+                            <td>@res.PuntajeServicio ⭐</td>
+                            <td>@res.PuntajeTiempo ⭐</td>
+                            <td><strong>@promedio.ToString("F1") ⭐</strong></td>
+                            <td>@res.FechaRespuesta.ToLocalTime().ToString("d")</td>
+                            <td><small>@res.Comentarios</small></td>
+                        </tr>
+                    }
+                </tbody>
+                <tfoot>
+                    <tr class="table-info">
+                        <td colspan="5"><strong>PROMEDIO GENERAL</strong></td>
+                        <td colspan="3"><strong>@(_resultados.Average(r => (r.PuntajeAtencion + r.PuntajeServicio + r.PuntajeTiempo) / 3.0).ToString("F2")) ⭐</strong></td>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+    }
+</div>
+
+@code {
+    private IEnumerable<EncuestaDto>? _resultados;
+    private MetricasDto? _metricas;
+    private string? _errorMessage;
+    private DateTime? _desde;
+    private DateTime? _hasta;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CargarDatos();
+    }
+
+    private async Task Filtrar() => await CargarDatos();
+
+    private async Task LimpiarFiltro()
+    {
+        _desde = null;
+        _hasta = null;
+        await CargarDatos();
+    }
+
+    private async Task CargarDatos()
+    {
+        try
+        {
+            _resultados = await EncuestaClient.GetResultadosAsync(_desde, _hasta);
+            _metricas = await EncuestaClient.GetMetricasAsync();
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Error al cargar los resultados: {ex.Message}";
+            _resultados = [];
+        }
+    }
+}

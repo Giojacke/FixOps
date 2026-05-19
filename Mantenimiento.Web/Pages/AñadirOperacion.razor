@@ -1,0 +1,513 @@
+@page "/añadir-operacion/{OrdenId:guid}"
+@using Mantenimiento.Application.DTOs
+@using Mantenimiento.Domain.Enums
+@using Mantenimiento.Web.Services
+@inject OrdenTrabajoClient OrdenTrabajoClient
+@inject ProgramadorClient ProgramadorClient
+@inject NavigationManager NavigationManager
+@inject AuthenticationStateProvider AuthStateProvider
+@attribute [Authorize(Roles = "Administrador, Tecnico, Programador")]
+
+@code { private static readonly int[] NumerosOperacion = [10, 20, 30, 40, 50, 60, 70, 80]; }
+
+<!-- ===== ESTILOS ===== -->
+<style>
+    .bg-orange { background-color: #fd7e14 !important; }
+    .modal-overlay { position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.5);z-index:1050;display:flex;align-items:center;justify-content:center; }
+    .modal-box     { background:#fff;border-radius:8px;padding:24px;min-width:420px;max-width:600px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.3); }
+    .modal-confirm { max-width:420px; }
+</style>
+
+<div class="container mt-4">
+
+    <!-- ===== CABECERA ===== -->
+    @if (_orden != null)
+    {
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <div>
+                <h4 class="mb-0">Orden <span class="text-primary">@_orden.Folio</span></h4>
+                <small class="text-muted">@_orden.Descripcion</small>
+            </div>
+            <span class="badge fs-6 @GetOrdenBadge(_orden.Estado)">@_orden.Estado</span>
+        </div>
+    }
+
+    <!-- ===== TABLA DE OPERACIONES ===== -->
+    @if (_orden != null)
+    {
+        <div class="card shadow-sm mb-4">
+            <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">Operaciones</h5>
+                <span class="badge bg-light text-dark">@_orden.Operaciones.Count() registradas</span>
+            </div>
+
+            @if (_orden.Operaciones.Any())
+            {
+                <div class="card-body p-0">
+                    <table class="table table-hover mb-0 align-middle">
+                        <thead class="table-light">
+                            <tr>
+                                <th style="width:80px">N° Op.</th>
+                                <th>Función a realizar</th>
+                                <th style="width:115px">Estado</th>
+                                <AuthorizeView Roles="Tecnico">
+                                    <th style="width:130px">Actividad</th>
+                                </AuthorizeView>
+                                <th style="width:90px">Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var op in _orden.Operaciones.OrderBy(o => o.Numero))
+                            {
+                                <tr>
+                                    <td><span class="fw-bold text-primary fs-5">@op.Numero</span></td>
+                                    <td>@op.Descripcion</td>
+                                    <td><span class="badge @GetEstadoOpBadge(op.Estado)">@op.Estado</span></td>
+
+                                    <!-- Desarrollar actividad: solo Técnico -->
+                                    <AuthorizeView Roles="Tecnico">
+                                        <td>
+                                            @if (op.Estado != EstadoOperacion.Finalizada)
+                                            {
+                                                <a href="/actividad/@OrdenId/@op.Id"
+                                                   class="btn btn-sm @(op.Estado == EstadoOperacion.Pausa ? "btn-warning" : "btn-outline-primary")">
+                                                    <i class="bi bi-play-circle me-1"></i>
+                                                    @(op.Estado == EstadoOperacion.Pausa ? "Reanudar" : "Desarrollar")
+                                                </a>
+                                            }
+                                            else
+                                            {
+                                                <span class="text-muted small">Completada</span>
+                                            }
+                                        </td>
+                                    </AuthorizeView>
+
+                                    <!-- Editar / Eliminar / Ver: Administrador y Programador -->
+                                    <td>
+                                        <AuthorizeView Roles="Administrador,Programador">
+                                            <div class="btn-group btn-group-sm">
+                                                @if (op.Estado != EstadoOperacion.Finalizada &&
+                                                     _orden.Estado != EstadoOrden.Finalizada &&
+                                                     _orden.Estado != EstadoOrden.Cancelada)
+                                                {
+                                                    <button class="btn btn-outline-warning" title="Editar"
+                                                            @onclick="() => AbrirEditar(op)">
+                                                        <i class="bi bi-pencil"></i>
+                                                    </button>
+                                                    <button class="btn btn-outline-danger" title="Eliminar"
+                                                            @onclick="() => PedirConfirmEliminar(op)">
+                                                        <i class="bi bi-trash"></i>
+                                                    </button>
+                                                }
+                                                <button class="btn btn-outline-info" title="Ver detalle"
+                                                        @onclick="() => AbrirVer(op)">
+                                                    <i class="bi bi-eye"></i>
+                                                </button>
+                                            </div>
+                                        </AuthorizeView>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+            else
+            {
+                <div class="card-body text-muted">Esta orden aún no tiene operaciones registradas.</div>
+            }
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(_mensajeOp))
+    {
+        <div class="alert alert-@_tipoMensajeOp alert-dismissible">
+            @_mensajeOp
+            <button type="button" class="btn-close" @onclick="()=>_mensajeOp=null"></button>
+        </div>
+    }
+
+    <!-- ===== FORMULARIO NUEVA OPERACIÓN (Administrador y Programador) ===== -->
+    <AuthorizeView Roles="Administrador,Programador">
+        @if (_orden != null && _orden.Estado != EstadoOrden.Finalizada && _orden.Estado != EstadoOrden.Cancelada)
+        {
+            <div class="card shadow-sm">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0">Añadir nueva operación</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-3">
+                            <label class="form-label fw-semibold">N° de Operación *</label>
+                            <select class="form-select" @bind="_request.Numero">
+                                <option value="0">-- Seleccione --</option>
+                                @foreach (var n in NumerosDisponibles())
+                                {
+                                    <option value="@n">@n</option>
+                                }
+                            </select>
+                            @if (!NumerosDisponibles().Any())
+                            {
+                                <div class="text-danger small mt-1">Todos los números están en uso.</div>
+                            }
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold">Función a realizar *</label>
+                            <textarea class="form-control" rows="2" placeholder="Describa la función que se ejecutará..."
+                                      @bind="_request.Descripcion"></textarea>
+                        </div>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-success" @onclick="HandleSubmit"
+                                disabled="@(_isSubmitting || !NumerosDisponibles().Any())">
+                            @if (_isSubmitting) { <span class="spinner-border spinner-border-sm"></span> <span> Guardando...</span> }
+                            else { <span><i class="bi bi-plus-circle me-1"></i>Guardar Operación</span> }
+                        </button>
+                        <a href="@_backUrl" class="btn btn-outline-secondary">Volver</a>
+                    </div>
+                    @if (!string.IsNullOrEmpty(_errorMessage))
+                    {
+                        <div class="alert alert-danger mt-3">@_errorMessage</div>
+                    }
+                </div>
+            </div>
+        }
+        else if (_orden?.Estado == EstadoOrden.Finalizada || _orden?.Estado == EstadoOrden.Cancelada)
+        {
+            <div class="alert alert-warning d-flex align-items-center gap-3">
+                <span>Esta orden está <strong>@_orden.Estado</strong> y no admite nuevas operaciones.</span>
+                <a href="@_backUrl" class="btn btn-sm btn-outline-secondary">Volver</a>
+            </div>
+        }
+    </AuthorizeView>
+</div>
+
+<!-- ===== MODAL EDITAR OPERACIÓN ===== -->
+@if (_editOp != null)
+{
+    <div class="modal-overlay">
+        <div class="modal-box">
+            <h5 class="mb-3"><i class="bi bi-pencil-square me-2"></i>Editar Operación</h5>
+            <div class="row g-2 mb-3">
+                <div class="col-4">
+                    <label class="form-label">N° de Operación *</label>
+                    <select class="form-select" @bind="_editOp.Numero">
+                        @foreach (var n in NumerosOperacion)
+                        {
+                            var usadoPorOtra = _orden!.Operaciones.Any(o => o.Numero == n && o.Id != _editOpId);
+                            <option value="@n" disabled="@usadoPorOtra">@n @(usadoPorOtra ? "(en uso)" : "")</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-8">
+                    <label class="form-label">Función a realizar *</label>
+                    <textarea class="form-control" rows="2" @bind="_editOp.Descripcion"></textarea>
+                </div>
+            </div>
+            <div class="d-flex justify-content-end gap-2">
+                <button class="btn btn-outline-secondary" @onclick="()=>_editOp=null">Cancelar</button>
+                <button class="btn btn-success" @onclick="ConfirmGuardarEdicion">Guardar cambios</button>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- ===== MODAL CONFIRMACIÓN ===== -->
+@if (_confirm)
+{
+    <div class="modal-overlay">
+        <div class="modal-box modal-confirm">
+            <h5 class="mb-3"><i class="bi bi-exclamation-triangle-fill text-warning me-2"></i>Confirmar acción</h5>
+            <p>@_confirmMsg</p>
+            <div class="d-flex justify-content-end gap-2">
+                <button class="btn btn-outline-secondary" @onclick="CancelarConfirm">No, cancelar</button>
+                <button class="btn btn-danger" @onclick="EjecutarConfirm">Sí, confirmar</button>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- ===== MODAL VER DETALLE (solo lectura, Administrador) ===== -->
+@if (_opVer != null)
+{
+    <div class="modal-overlay" @onclick="() => _opVer = null">
+        <div class="modal-box" style="max-width:560px" @onclick:stopPropagation>
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h5 class="mb-0"><i class="bi bi-eye me-2 text-info"></i>Operación @_opVer.Numero — Detalle</h5>
+                <span class="badge @GetEstadoOpBadge(_opVer.Estado)">@_opVer.Estado</span>
+            </div>
+            <p class="text-muted mb-3">@_opVer.Descripcion</p>
+
+            @if (_opVer.Estado == EstadoOperacion.Finalizada)
+            {
+                <dl class="row mb-0">
+                    <dt class="col-5">Fecha inicio</dt>
+                    <dd class="col-7">@(_opVer.FechaInicio?.ToString("dd/MM/yyyy HH:mm") ?? "—")</dd>
+                    <dt class="col-5">Fecha fin</dt>
+                    <dd class="col-7">@(_opVer.FechaFin?.ToString("dd/MM/yyyy HH:mm") ?? "—")</dd>
+                    @if (_opVer.FechaInicio.HasValue && _opVer.FechaFin.HasValue)
+                    {
+                        var dur = _opVer.FechaFin.Value - _opVer.FechaInicio.Value;
+                        <dt class="col-5">Duración</dt>
+                        <dd class="col-7">@(dur.TotalHours >= 1 ? $"{(int)dur.TotalHours} h {dur.Minutes} min" : $"{dur.Minutes} min")</dd>
+                    }
+                    <dt class="col-5">Detalle finalización</dt>
+                    <dd class="col-7">@(_opVer.DetalleFinalizacion ?? "—")</dd>
+                </dl>
+            }
+            else if (_opVer.Estado == EstadoOperacion.Pausa)
+            {
+                <dl class="row mb-3">
+                    <dt class="col-5">Fecha inicio</dt>
+                    <dd class="col-7">@(_opVer.FechaInicio?.ToString("dd/MM/yyyy HH:mm") ?? "—")</dd>
+                    <dt class="col-5">Motivo pausa</dt>
+                    <dd class="col-7">@MotivoPausaLabel(_opVer.MotivoPausa)</dd>
+                </dl>
+
+                @if (_opVer.SolicitudesMateriales != null && _opVer.SolicitudesMateriales.Any())
+                {
+                    <h6 class="fw-semibold">Materiales solicitados</h6>
+                    <table class="table table-sm table-bordered mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Material</th>
+                                <th style="width:80px" class="text-center">Cantidad</th>
+                                <th style="width:90px" class="text-center">Tipo</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var s in _opVer.SolicitudesMateriales)
+                            {
+                                <tr>
+                                    <td>@s.NombreMaterial</td>
+                                    <td class="text-center">@s.Cantidad</td>
+                                    <td class="text-center">
+                                        @if (s.EsPersonalizado)
+                                        {
+                                            <span class="badge bg-secondary">Personalizado</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="badge bg-primary">Catálogo</span>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+                else
+                {
+                    <p class="text-muted small">Sin materiales solicitados.</p>
+                }
+
+                @if (_opVer.SolicitudesMateriales != null && _opVer.SolicitudesMateriales.Any())
+                {
+                    <AuthorizeView Roles="Programador">
+                        <div class="mt-3">
+                            @if (!string.IsNullOrEmpty(_aprobMensaje))
+                            {
+                                <div class="alert alert-@_aprobTipo py-2 small mb-2">@_aprobMensaje</div>
+                            }
+                            <button class="btn btn-success btn-sm" @onclick="AprobarMateriales"
+                                    disabled="@_aprobando">
+                                @if (_aprobando)
+                                { <span class="spinner-border spinner-border-sm"></span> <span> Procesando...</span> }
+                                else
+                                { <span><i class="bi bi-check-circle me-1"></i>Aprobar y notificar técnico</span> }
+                            </button>
+                        </div>
+                    </AuthorizeView>
+                }
+            }
+            else
+            {
+                <p class="text-muted fst-italic">Sin actividad registrada aún.</p>
+            }
+
+            <div class="d-flex justify-content-end mt-3">
+                <button class="btn btn-secondary" @onclick="() => { _opVer = null; _aprobMensaje = null; }">Cerrar</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public Guid OrdenId { get; set; }
+
+    private AgregarOperacionRequest _request = new() { HorasHombre = 1 };
+    private OrdenTrabajoDto? _orden;
+    private bool  _isSubmitting;
+    private string? _errorMessage;
+    private string? _mensajeOp;
+    private string  _tipoMensajeOp = "success";
+    private string  _backUrl = "/";
+
+    // Edición
+    private Guid _editOpId;
+    private EditarOperacionRequest? _editOp;
+
+    // Ver detalle (solo lectura)
+    private OperacionDto? _opVer;
+
+    // Aprobación de materiales (Programador)
+    private bool    _aprobando;
+    private string? _aprobMensaje;
+    private string  _aprobTipo = "success";
+
+    // Confirmación genérica
+    private bool   _confirm;
+    private string _confirmMsg   = string.Empty;
+    private Func<Task>? _pendingAction;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        if (auth.User.IsInRole("Programador")) _backUrl = "/programador";
+        await CargarOrden();
+    }
+
+    private async Task CargarOrden()
+    {
+        var result = await OrdenTrabajoClient.GetOrdenByIdAsync(OrdenId);
+        if (result.IsSuccess)
+        {
+            _orden = result.Value;
+            var disponible = NumerosDisponibles().FirstOrDefault();
+            _request.Numero = disponible;
+        }
+    }
+
+    private IEnumerable<int> NumerosDisponibles()
+    {
+        if (_orden == null) return NumerosOperacion;
+        var usados = _orden.Operaciones.Select(o => o.Numero).ToHashSet();
+        return NumerosOperacion.Where(n => !usados.Contains(n));
+    }
+
+    // ---------- NUEVA OPERACIÓN ----------
+    private async Task HandleSubmit()
+    {
+        if (_request.Numero == 0) { _errorMessage = "Seleccione un número de operación."; return; }
+        if (string.IsNullOrWhiteSpace(_request.Descripcion)) { _errorMessage = "Ingrese la función a realizar."; return; }
+
+        _isSubmitting = true; _errorMessage = null;
+        var result = await OrdenTrabajoClient.AgregarOperacionAsync(OrdenId, _request);
+        if (result.IsSuccess)
+        {
+            _mensajeOp = $"Operación {_request.Numero} agregada."; _tipoMensajeOp = "success";
+            _request = new() { HorasHombre = 1 };
+            await CargarOrden();
+        }
+        else { _errorMessage = result.ErrorMessage; }
+        _isSubmitting = false;
+    }
+
+    // ---------- CAMBIO DE ESTADO (solo Técnico) ----------
+    private async Task CambiarEstadoOp(Guid operacionId, EstadoOperacion nuevoEstado)
+    {
+        var result = await OrdenTrabajoClient.ActualizarEstadoOperacionAsync(operacionId, nuevoEstado);
+        if (result.IsSuccess)
+        {
+            _mensajeOp = $"Estado actualizado a {nuevoEstado}."; _tipoMensajeOp = "success";
+            await CargarOrden();
+        }
+        else { _mensajeOp = result.ErrorMessage; _tipoMensajeOp = "danger"; }
+    }
+
+    // ---------- EDITAR ----------
+    private void AbrirEditar(OperacionDto op)
+    {
+        _editOpId = op.Id;
+        _editOp   = new() { Numero = op.Numero, Descripcion = op.Descripcion, HorasHombre = op.HorasHombre };
+    }
+
+    private void ConfirmGuardarEdicion()
+    {
+        _pendingAction = GuardarEdicion;
+        _confirmMsg    = $"¿Confirmar los cambios en la operación {_editOp?.Numero}?";
+        _confirm       = true;
+    }
+
+    private async Task GuardarEdicion()
+    {
+        var result = await OrdenTrabajoClient.EditarOperacionAsync(_editOpId, _editOp!);
+        if (result.IsSuccess)
+        {
+            _mensajeOp = "Operación actualizada."; _tipoMensajeOp = "success";
+            _editOp = null;
+            await CargarOrden();
+        }
+        else { _mensajeOp = result.ErrorMessage; _tipoMensajeOp = "danger"; _editOp = null; }
+    }
+
+    // ---------- ELIMINAR ----------
+    private void PedirConfirmEliminar(OperacionDto op)
+    {
+        _confirmMsg    = $"¿Eliminar la operación {op.Numero} — \"{op.Descripcion}\"? Esta acción no se puede deshacer.";
+        _pendingAction = async () =>
+        {
+            var result = await OrdenTrabajoClient.EliminarOperacionAsync(op.Id);
+            if (result.IsSuccess) { _mensajeOp = $"Operación {op.Numero} eliminada."; _tipoMensajeOp = "success"; await CargarOrden(); }
+            else                  { _mensajeOp = result.ErrorMessage; _tipoMensajeOp = "danger"; }
+        };
+        _confirm = true;
+    }
+
+    // ---------- CONFIRMACIÓN GENÉRICA ----------
+    private void CancelarConfirm() { _confirm = false; _pendingAction = null; }
+    private async Task EjecutarConfirm() { _confirm = false; if (_pendingAction != null) await _pendingAction(); _pendingAction = null; }
+
+    // ---------- VER ----------
+    private void AbrirVer(OperacionDto op) { _opVer = op; _aprobMensaje = null; }
+
+    // ---------- APROBAR MATERIALES (Programador) ----------
+    private async Task AprobarMateriales()
+    {
+        if (_opVer == null || _orden == null) return;
+        var tecnicoId = _orden.TecnicoAsignadoId ?? Guid.Empty;
+        if (tecnicoId == Guid.Empty) { _aprobMensaje = "La operación no tiene técnico asignado."; _aprobTipo = "warning"; return; }
+
+        _aprobando = true;
+        var request = new AprobacionMaterialRequest
+        {
+            OperacionId = _opVer.Id,
+            TecnicoId   = tecnicoId,
+            MensajeAdicional = $"Materiales aprobados para operación {_opVer.Numero}."
+        };
+        var result = await ProgramadorClient.AprobarMaterialesAsync(request);
+        _aprobMensaje = result.IsSuccess ? "Materiales aprobados y técnico notificado." : result.ErrorMessage;
+        _aprobTipo    = result.IsSuccess ? "success" : "danger";
+        _aprobando    = false;
+        if (result.IsSuccess) await CargarOrden();
+    }
+
+    private static string MotivoPausaLabel(MotivoPausa? motivo) => motivo switch
+    {
+        MotivoPausa.FinTurno           => "Fin de turno",
+        MotivoPausa.NecesidadEquipos   => "Necesidad de equipos/materiales",
+        MotivoPausa.FueraAlcance       => "Fuera de alcance",
+        MotivoPausa.EquipoNoDisponible => "Equipo no disponible",
+        MotivoPausa.AtenderOtroServicio => "Atender otro servicio",
+        _ => "—"
+    };
+
+    // ---------- BADGES ----------
+    private string GetEstadoOpBadge(EstadoOperacion e) => e switch
+    {
+        EstadoOperacion.Pendiente  => "bg-warning text-dark",
+        EstadoOperacion.EnProceso  => "bg-info text-dark",
+        EstadoOperacion.Pausa      => "bg-orange text-dark",
+        EstadoOperacion.Finalizada => "bg-success",
+        _ => "bg-secondary"
+    };
+
+    private string GetOrdenBadge(EstadoOrden e) => e switch
+    {
+        EstadoOrden.Pendiente  => "bg-warning text-dark",
+        EstadoOrden.EnProceso  => "bg-info text-dark",
+        EstadoOrden.Finalizada => "bg-success",
+        EstadoOrden.Cancelada  => "bg-danger",
+        _ => "bg-secondary"
+    };
+}

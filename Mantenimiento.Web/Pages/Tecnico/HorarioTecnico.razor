@@ -1,0 +1,233 @@
+@page "/mi-horario"
+@using Mantenimiento.Application.DTOs
+@using Mantenimiento.Web.Services
+@using System.Security.Claims
+@inject ProgramadorClient ProgramadorClient
+@inject AuthenticationStateProvider AuthStateProvider
+@attribute [Authorize(Roles = "Tecnico")]
+
+<PageTitle>Mi Horario de Trabajo</PageTitle>
+
+<div class="container mt-4">
+
+    <!-- ── Encabezado ── -->
+    <div class="d-flex align-items-center justify-content-between mb-4 flex-wrap gap-2">
+        <div>
+            <h2 class="mb-0"><i class="bi bi-calendar-week me-2"></i>Mi Horario de Trabajo</h2>
+            <p class="text-muted mb-0 small">Semana del <strong>@_lunes.ToString("dd/MM/yyyy")</strong> al <strong>@_domingo.ToString("dd/MM/yyyy")</strong></p>
+        </div>
+
+        <!-- Navegación de semanas -->
+        <div class="d-flex align-items-center gap-2">
+            <button class="btn btn-outline-secondary btn-sm" @onclick="SemanaAnterior" title="Semana anterior">
+                <i class="bi bi-chevron-left"></i>
+            </button>
+
+            <div class="input-group input-group-sm" style="width:175px">
+                <span class="input-group-text"><i class="bi bi-calendar3"></i></span>
+                <input type="date" class="form-control"
+                       value="@_lunes.ToString("yyyy-MM-dd")"
+                       @onchange="OnFechaChange"
+                       title="Seleccione cualquier día de la semana deseada" />
+            </div>
+
+            <button class="btn btn-outline-secondary btn-sm" @onclick="SemanaSiguiente" title="Semana siguiente">
+                <i class="bi bi-chevron-right"></i>
+            </button>
+
+            <button class="btn btn-outline-primary btn-sm" @onclick="IrSemanaActual" title="Ir a semana actual">
+                Hoy
+            </button>
+        </div>
+    </div>
+
+    @if (_cargando)
+    {
+        <div class="text-center py-5">
+            <div class="spinner-border text-primary" role="status"></div>
+            <p class="mt-2 text-muted">Cargando horario...</p>
+        </div>
+    }
+    else if (_turnos == null)
+    {
+        <div class="alert alert-danger">No se pudo cargar el horario. Verifique su conexión.</div>
+    }
+    else
+    {
+        <!-- ── Tarjeta resumen ── -->
+        <div class="row g-3 mb-4">
+            <div class="col-6 col-md-3">
+                <div class="card border-0 bg-primary text-white text-center py-3">
+                    <div class="fs-2 fw-bold">@_diasConTurno</div>
+                    <div class="small">Días asignados</div>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="card border-0 bg-success text-white text-center py-3">
+                    <div class="fs-2 fw-bold">@_totalHorasEfectivas.ToString("F1")</div>
+                    <div class="small">Horas efectivas</div>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="card border-0 bg-info text-white text-center py-3">
+                    <div class="fs-2 fw-bold">@_diasConAlmuerzo</div>
+                    <div class="small">Con almuerzo</div>
+                </div>
+            </div>
+            <div class="col-6 col-md-3">
+                <div class="card border-0 @(_sinHorario?"bg-warning":"bg-secondary") text-white text-center py-3">
+                    <div class="fs-2 fw-bold">@(7 - _diasConTurno)</div>
+                    <div class="small">Días libres</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── Grilla de la semana ── -->
+        <div class="row g-3">
+            @foreach (var dia in _diasSemana)
+            {
+                var turno  = _turnosPorFecha.GetValueOrDefault(dia);
+                var esHoy  = dia == DateOnly.FromDateTime(DateTime.Today);
+                var pasado = dia < DateOnly.FromDateTime(DateTime.Today);
+
+                <div class="col-12 col-sm-6 col-lg-4 col-xl-3">
+                    <div class="card h-100 @(esHoy ? "border-primary shadow" : "") @(pasado && turno == null ? "opacity-50" : "")">
+                        <!-- Cabecera del día -->
+                        <div class="card-header py-2 @(esHoy ? "bg-primary text-white" : turno != null ? "bg-light" : "bg-white")">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <span class="fw-semibold">@NombreDia(dia.DayOfWeek)</span>
+                                <span class="badge @(esHoy ? "bg-white text-primary" : "bg-secondary")">@dia.ToString("dd MMM")</span>
+                            </div>
+                        </div>
+
+                        <!-- Contenido -->
+                        <div class="card-body py-3">
+                            @if (turno != null)
+                            {
+                                <div class="d-flex align-items-center gap-2 mb-2">
+                                    <i class="bi bi-clock text-primary"></i>
+                                    <span class="fw-semibold">@turno.HoraInicio.ToString("HH:mm") – @turno.HoraFin.ToString("HH:mm")</span>
+                                </div>
+                                <div class="d-flex align-items-center gap-2 mb-2">
+                                    <i class="bi bi-hourglass-split text-success"></i>
+                                    <span>@turno.HorasEfectivas.ToString("F1") h efectivas</span>
+                                </div>
+                                @if (turno.IncluyeAlmuerzo)
+                                {
+                                    <span class="badge bg-info text-dark"><i class="bi bi-cup-hot me-1"></i>Incluye almuerzo</span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-light text-muted border">Sin almuerzo</span>
+                                }
+                            }
+                            else
+                            {
+                                <div class="text-center text-muted py-2">
+                                    <i class="bi bi-calendar-x fs-4"></i>
+                                    <p class="mb-0 small mt-1">Sin turno asignado</p>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+
+        @if (_sinHorario)
+        {
+            <div class="alert alert-warning mt-4">
+                <i class="bi bi-info-circle me-2"></i>No tiene turnos asignados para esta semana. Contacte a su programador.
+            </div>
+        }
+    }
+</div>
+
+@code {
+    private DateOnly _lunes;
+    private DateOnly _domingo;
+    private List<DateOnly> _diasSemana = [];
+
+    private List<TurnoHorarioDto>?          _turnos;
+    private Dictionary<DateOnly, TurnoHorarioDto> _turnosPorFecha = [];
+
+    private bool _cargando = true;
+    private Guid _tecnicoId;
+
+    // Resumen
+    private int    _diasConTurno         => _turnosPorFecha.Count;
+    private int    _diasConAlmuerzo      => _turnosPorFecha.Values.Count(t => t.IncluyeAlmuerzo);
+    private double _totalHorasEfectivas  => _turnosPorFecha.Values.Sum(t => t.HorasEfectivas);
+    private bool   _sinHorario           => _turnos?.Count == 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        var idStr = auth.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (!Guid.TryParse(idStr, out _tecnicoId)) return;
+
+        SetSemana(DateOnly.FromDateTime(DateTime.Today));
+        await CargarTurnos();
+    }
+
+    private void SetSemana(DateOnly fecha)
+    {
+        // Calcular el lunes de la semana que contiene 'fecha'
+        var diff = (int)fecha.DayOfWeek - (int)DayOfWeek.Monday;
+        if (diff < 0) diff += 7; // domingo = 6 días atrás
+        _lunes   = fecha.AddDays(-diff);
+        _domingo = _lunes.AddDays(6);
+        _diasSemana = Enumerable.Range(0, 7).Select(i => _lunes.AddDays(i)).ToList();
+    }
+
+    private async Task CargarTurnos()
+    {
+        _cargando = true;
+        try
+        {
+            _turnos = await ProgramadorClient.GetTurnosAsync(_tecnicoId, _lunes, _domingo);
+            _turnosPorFecha = _turnos.ToDictionary(t => t.Fecha);
+        }
+        catch { _turnos = null; }
+        _cargando = false;
+    }
+
+    private async Task SemanaAnterior()
+    {
+        SetSemana(_lunes.AddDays(-7));
+        await CargarTurnos();
+    }
+
+    private async Task SemanaSiguiente()
+    {
+        SetSemana(_lunes.AddDays(7));
+        await CargarTurnos();
+    }
+
+    private async Task IrSemanaActual()
+    {
+        SetSemana(DateOnly.FromDateTime(DateTime.Today));
+        await CargarTurnos();
+    }
+
+    private async Task OnFechaChange(ChangeEventArgs e)
+    {
+        if (DateOnly.TryParse(e.Value?.ToString(), out var fecha))
+        {
+            SetSemana(fecha); // se ajusta automáticamente al lunes de esa semana
+            await CargarTurnos();
+        }
+    }
+
+    private static string NombreDia(DayOfWeek dia) => dia switch
+    {
+        DayOfWeek.Monday    => "Lunes",
+        DayOfWeek.Tuesday   => "Martes",
+        DayOfWeek.Wednesday => "Miércoles",
+        DayOfWeek.Thursday  => "Jueves",
+        DayOfWeek.Friday    => "Viernes",
+        DayOfWeek.Saturday  => "Sábado",
+        DayOfWeek.Sunday    => "Domingo",
+        _                   => dia.ToString()
+    };
+}
