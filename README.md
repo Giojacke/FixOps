@@ -1,198 +1,199 @@
-# Sistema de Mantenimiento
+# FixOps — Sistema Inteligente de Gestión de Mantenimiento
 
-Backend y frontend para gestion de ordenes de trabajo de mantenimiento.
-Solucion basada en .NET 9 con separacion por capas (Domain/Application/Infrastructure/API/Web).
+**Repositorio:** https://github.com/Giojacke/FixOps
 
-## 1. Arquitectura
+Sistema web para digitalizar y centralizar la gestión de órdenes de trabajo de mantenimiento. Permite a organizaciones con equipos técnicos registrar solicitudes, asignar técnicos, hacer seguimiento de operaciones, calificar el servicio y analizar métricas de desempeño en tiempo real.
 
-### Proyectos
+---
 
-- `Mantenimiento.Domain`: entidades, enums e interfaces de repositorio/UoW.
-- `Mantenimiento.Application`: casos de uso, DTOs, validaciones y servicios de aplicacion.
-- `Mantenimiento.Infrastructure`: EF Core, Identity, repositorios concretos, UnitOfWork y servicios externos.
-- `Mantenimiento.API`: capa de exposicion HTTP (ASP.NET Core), autenticacion/autorizacion JWT.
-- `Mantenimiento.Web`: cliente Blazor WebAssembly.
+## Tecnologías Utilizadas
 
-### Patrones aplicados
+| Capa | Tecnología |
+|---|---|
+| Backend API | .NET 9 · ASP.NET Core Web API |
+| ORM / Base de datos | Entity Framework Core 9 · SQL Server (LocalDB dev) |
+| Autenticación | ASP.NET Core Identity · JWT Bearer |
+| Frontend | Blazor WebAssembly (.NET 9) |
+| Validaciones | FluentValidation |
+| Documentación API | Swagger / OpenAPI |
+| Gráficos | Chart.js 4.4.3 |
+| Correo | SMTP (MailKit) con cola de reintentos |
+| Importación Excel | ClosedXML |
 
-- Clean Architecture (dependencias hacia adentro).
-- Repository + Unit of Work.
-- DTO mapping entre capas.
-- Validacion de entrada con FluentValidation.
+---
 
-## 2. Stack Tecnologico
+## Épicas y MVP Implementadas
 
+### Épica 1 — Administración y Seguridad del Sistema
+- **HU-17** Crear usuarios (Técnico, Programador, Solicitante, Administrador) con validación de email único
+- **HU-18** Asociar jefe a dependencia con email para notificaciones automáticas
+- **HU-22** Autorización por rol: cada usuario ve y puede hacer solo lo que le corresponde
+
+### Épica 2 — Gestión Operativa de Mantenimiento
+- **HU-6**  Crear órdenes de trabajo con folio único, dependencia, urgencia y técnico asignado
+- **HU-7**  Visualizar órdenes filtradas por estado (Pendiente → En Proceso → Finalizada | Cancelada)
+- **HU-9**  Agregar múltiples operaciones a una orden; bloqueado en órdenes finalizadas
+- **HU-10** Actualizar estado de operación con restricción al técnico asignado
+
+### Épica 3 — Encuestas y Automatización
+- **HU-12** Envío automático de encuesta por correo al jefe de la dependencia al finalizar una orden
+- **HU-13** Responder encuesta con calificación 1–5 en Atención, Servicio y Tiempo + comentario opcional
+- **HU-15** Dashboard de métricas de satisfacción por técnico y por dependencia con filtro de fechas
+- **HU-20** Gestión completa de materiales (CRUD + stock + bloqueo de eliminación si está en uso)
+
+**Resultado: 11/11 Historias de Usuario implementadas y validadas**
+
+---
+
+## Patrones de Diseño GoF Implementados
+
+### 1. Repository (Patrón de Acceso a Datos)
+Abstrae el acceso a la base de datos detrás de interfaces. Las capas superiores nunca conocen EF Core.
+```
+Domain/Interfaces/IRepository.cs           ← interfaz genérica
+Infrastructure/Persistence/EfRepository.cs ← implementación con EF Core
+Infrastructure/Persistence/OrdenTrabajoRepository.cs ← repositorio especializado
+```
+
+### 2. Unit of Work
+Agrupa múltiples operaciones de repositorio en una sola transacción atómica.
+```
+Domain/Interfaces/IUnitOfWork.cs
+Infrastructure/Persistence/UnitOfWork.cs
+```
+```csharp
+await unitOfWork.Operaciones.AddAsync(operacion);
+await unitOfWork.SaveChangesAsync(); // una sola transacción
+```
+
+### 3. Strategy (FluentValidation)
+Cada validador encapsula una estrategia de validación intercambiable, registrada en el contenedor de DI.
+```
+Application/Validators/CrearOrdenRequestValidator.cs
+Application/Validators/EncuestaValidator.cs
+Application/Validators/MasterValidators.cs
+```
+```csharp
+// El controlador no sabe qué reglas aplica, solo invoca la estrategia
+var result = await validator.ValidateAsync(request);
+```
+
+### 4. Facade (Servicios de Aplicación)
+Los servicios de la capa Application actúan como fachada: simplifican operaciones complejas que involucran múltiples repositorios, validaciones y efectos secundarios (email, auditoría).
+```
+Application/Services/OrdenTrabajoService.cs  ← fachada de órdenes
+Application/Services/EncuestaService.cs      ← fachada de encuestas
+Application/Services/MasterServices.cs       ← fachada de maestros
+```
+
+### 5. Observer (Cola de Correos con Worker)
+El `EmailQueueWorker` observa la base de datos en busca de correos pendientes y los procesa de forma asíncrona, sin que el flujo principal tenga que esperar.
+```
+Infrastructure/BackgroundServices/EmailQueueWorker.cs  ← observer/worker
+Infrastructure/Services/QueuedEmailService.cs          ← encola eventos
+API/Controllers/CorreoQueueController.cs               ← administración de la cola
+```
+
+### 6. Factory Method (Result<T>)
+El patrón Result encapsula éxito o fallo usando métodos de fábrica estáticos, evitando excepciones para flujos esperados.
+```
+Application/Common/Result.cs
+```
+```csharp
+return Result<Guid>.Success(encuesta.Id);   // factory de éxito
+return Result<Guid>.Failure("Mensaje.");     // factory de fallo
+```
+
+### 7. Template Method (EfRepository<T>)
+El repositorio genérico define el esqueleto de las operaciones CRUD. Los repositorios especializados sobrescriben solo lo necesario (ej: eager loading).
+```
+Infrastructure/Persistence/Repositories/EfRepository.cs         ← template
+Infrastructure/Persistence/Repositories/OrdenTrabajoRepository.cs ← override con Include()
+```
+
+### 8. Chain of Responsibility (Pipeline de Middleware)
+ASP.NET Core procesa cada request a través de una cadena configurable: autenticación → autorización → validación → controlador → respuesta.
+```
+API/Program.cs  ← configuración de la cadena
+```
+```csharp
+app.UseAuthentication();   // eslabón 1
+app.UseAuthorization();    // eslabón 2
+app.MapControllers();      // eslabón final
+```
+
+---
+
+## Pasos para Ejecutar
+
+### Requisitos previos
 - .NET SDK 9.x
-- ASP.NET Core Web API
-- Entity Framework Core (SQL Server)
-- ASP.NET Core Identity
-- JWT Bearer Authentication
-- Blazor WebAssembly
+- SQL Server o SQL Server LocalDB
 
-## 3. Requisitos
+### 1. Clonar el repositorio
+```powershell
+git clone https://github.com/Giojacke/FixOps.git
+cd FixOps
+```
 
-- .NET SDK 9.x
-- SQL Server (LocalDB para desarrollo local)
-- PowerShell (scripts/comandos de ejemplo)
-
-## 4. Configuracion por Entorno
-
-### Archivos
-
-- `Mantenimiento.API/appsettings.json`: base comun, sin secretos reales.
-- `Mantenimiento.API/appsettings.Development.json`: desarrollo local.
-
-### Variables criticas
-
-- `ConnectionStrings:DefaultConnection`
-- `Jwt:Key`
-- `Jwt:Issuer`
-- `Jwt:Audience`
-- `EmailSettings:*`
-- `SeedSettings:DefaultPassword` (solo desarrollo/demo)
-
-### Recomendacion de produccion
-
-- No almacenar secretos en repositorio.
-- Usar Secret Manager (local), variables de entorno, o proveedor externo de secretos (Key Vault / Secrets Manager).
-
-## 5. Seguridad
-
-### Estado actual
-
-- API protegida con JWT Bearer.
-- Endpoints de ordenes con autorizacion por rol.
-- Identity para usuarios/roles.
-
-### Requerido para produccion
-
-- Rotacion de `Jwt:Key` y vigencia corta de tokens.
-- Refresh tokens con revocacion.
-- Politica de contrasenas robusta y MFA para perfiles administrativos.
-- CORS restringido a dominios reales.
-- Rate limiting y proteccion de brute-force en login.
-- Validacion centralizada de errores (ProblemDetails + trazabilidad).
-- Auditoria de acciones sensibles (quien, cuando, que cambio).
-
-## 6. Base de Datos y Migraciones
-
-### Desarrollo
-
-La API inicia seed de roles/usuarios/dependencias automaticamente.
-
-### Produccion (recomendado)
-
-- Ejecutar migraciones en pipeline o job controlado:
-
+### 2. Aplicar migraciones y levantar la API
 ```powershell
 dotnet ef database update --project .\Mantenimiento.Infrastructure\Mantenimiento.Infrastructure.csproj --startup-project .\Mantenimiento.API\Mantenimiento.API.csproj
-```
 
-- Desactivar seed de usuarios de prueba.
-- Usar cuentas bootstrap temporales con expiracion.
-
-## 7. Ejecucion Local
-
-### API
-
-```powershell
 dotnet run --project .\Mantenimiento.API\Mantenimiento.API.csproj
 ```
+- API disponible en: `http://localhost:5284`
+- Swagger/OpenAPI en: `http://localhost:5284/swagger`
 
-URLs:
-
-- `http://localhost:5284`
-- `https://localhost:7259`
-
-Swagger:
-
-- `http://localhost:5284/swagger`
-- `https://localhost:7259/swagger`
-
-### Web
-
+### 3. Levantar el frontend
 ```powershell
 dotnet run --project .\Mantenimiento.Web\Mantenimiento.Web.csproj
 ```
+- Aplicación en: `http://localhost:5166`
+- Landing page en: `http://localhost:5166/landing.html`
 
-URLs:
+### 4. Usuarios de prueba (seed automático)
 
-- `http://localhost:5166`
-- `https://localhost:7106`
+| Usuario | Contraseña | Rol |
+|---|---|---|
+| admin1@mantenimiento.com | Admin123! | Administrador |
+| tecnico1@mantenimiento.com | Admin123! | Técnico |
+| tecnico2@mantenimiento.com | Admin123! | Técnico |
+| tecnico3@mantenimiento.com | Admin123! | Técnico |
 
-## 8. Usuarios Seed (solo desarrollo/demo)
+---
 
-- `admin1@mantenimiento.com`
-- `admin2@mantenimiento.com`
-- `tecnico1@mantenimiento.com`
-- `tecnico2@mantenimiento.com`
-- `tecnico3@mantenimiento.com`
+## Arquitectura del Proyecto
 
-Password local por defecto:
-
-- `Admin123!`
-
-Ubicacion:
-
-- `Mantenimiento.API/appsettings.Development.json` -> `SeedSettings:DefaultPassword`
-
-## 9. Build, Calidad y Pruebas
-
-### Build
-
-```powershell
-dotnet build .\SistemaMantenimiento.sln
+```
+SistemaMantenimiento/
+├── Mantenimiento.Domain/          ← Entidades, enums, interfaces (sin dependencias)
+├── Mantenimiento.Application/     ← Casos de uso, DTOs, validaciones, servicios
+├── Mantenimiento.Infrastructure/  ← EF Core, Identity, repositorios, email, workers
+├── Mantenimiento.API/             ← Controllers REST, JWT, Swagger
+└── Mantenimiento.Web/             ← Blazor WASM, páginas, servicios HTTP client
 ```
 
-Nota: si la API esta corriendo, puede bloquear DLL en `bin/Debug`.
+Las dependencias fluyen **solo hacia adentro** (Clean Architecture):
+`Web / API → Application → Domain ← Infrastructure`
 
-### Recomendado para produccion
+---
 
-- Agregar proyectos de pruebas:
-  - unitarias (`Application`, reglas de negocio)
-  - integracion (`API + DB`)
-  - contrato (OpenAPI)
-- Activar analizadores y tratar warnings criticos como error.
-- Escaneo de dependencias y vulnerabilidades en CI.
+## Evidencia de Funcionamiento
 
-## 10. Observabilidad (faltante para prod)
+### Dashboard de Analítica
+![Dashboard métricas](docs/screenshots/dashboard-metricas.png)
 
-Implementar:
+### Gestión de Órdenes de Trabajo
+![Órdenes de trabajo](docs/screenshots/ordenes-trabajo.png)
 
-- Logging estructurado (Serilog u OpenTelemetry Logs).
-- Correlation ID por request.
-- Metricas (latencia, throughput, errores por endpoint).
-- Trazas distribuidas (OpenTelemetry).
-- Health checks (`/health`, `/ready`) para orquestadores.
+### Módulo de Maestros
+![Maestros](docs/screenshots/maestros.png)
 
-## 11. Despliegue
+### Swagger API
+![Swagger](docs/screenshots/swagger-api.png)
 
-### Estrategia recomendada
+### Landing Page
+![Landing](docs/screenshots/landing-page.png)
 
-- Contenerizar API y Web.
-- Pipeline CI/CD con etapas:
-  - restore
-  - build
-  - test
-  - scan
-  - publish artifact
-  - deploy por entorno (dev/stg/prod)
-- Configuracion 12-factor por entorno.
-
-### Checklist minimo pre-produccion
-
-- [ ] secretos fuera del repo
-- [ ] HTTPS obligatorio + HSTS
-- [ ] CORS restringido
-- [ ] migraciones controladas
-- [ ] seed de prueba desactivado
-- [ ] backups y plan de restore DB
-- [ ] politicas de retencion de logs
-- [ ] monitoreo y alertas configuradas
-- [ ] pruebas de carga basicas
-- [ ] plan de rollback
-
-## 12. Estado del Repositorio
-
-Este repositorio nacio como proyecto dummy para arquitectura y pruebas funcionales.
-Tiene base tecnica valida para evolucion, pero requiere los puntos de hardening listados antes de usar en produccion real.
+> Las capturas se encuentran en la carpeta `/docs/screenshots/` del repositorio.
